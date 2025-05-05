@@ -1,0 +1,164 @@
+"EXIOBASE sector","SCAF sector"
+"Cultivation of paddy rice",Agriculture
+"Cultivation of wheat",Agriculture
+"Cultivation of cereal grains nec",Agriculture
+"Cultivation of vegetables, fruit, nuts",Agriculture
+"Cultivation of oil seeds",Agriculture
+"Cultivation of sugar cane, sugar beet",Agriculture
+"Cultivation of plant-based fibers",Agriculture
+"Cultivation of crops nec",Agriculture
+"Cattle farming",Agriculture
+"Pigs farming",Agriculture
+"Poultry farming",Agriculture
+"Meat animals nec",Agriculture
+"Animal products nec",Agriculture
+"Raw milk",Agriculture
+"Wool, silk-worm cocoons",Agriculture
+"Manure treatment (conventional), storage and land application",Agriculture
+"Manure treatment (biogas), storage and land application",Agriculture
+"Forestry, logging and related service activities (02)",Agriculture
+"Fishing, operating of fish hatcheries and fish farms; service activities incidental to fishing (05)",Agriculture
+"Mining of coal and lignite; extraction of peat (10)",Coal
+"Extraction of crude petroleum and services related to crude oil extraction, excluding surveying",Oil
+"Extraction of natural gas and services related to natural gas extraction, excluding surveying",Gas
+"Extraction, liquefaction, and regasification of other petroleum and gaseous materials",Gas
+"Mining of uranium and thorium ores (12)",Mining
+"Mining of iron ores",Mining
+"Mining of copper ores and concentrates",Mining
+"Mining of nickel ores and concentrates",Mining
+"Mining of aluminium ores and concentrates",Mining
+"Mining of precious metal ores and concentrates",Mining
+"Mining of lead, zinc and tin ores and concentrates",Mining
+"Mining of other non-ferrous metal ores and concentrates",Mining
+"Quarrying of stone",Mining
+"Quarrying of sand and clay",Mining
+"Mining of chemical and fertilizer minerals, production of salt, other mining and quarrying n.e.c.",Mining
+"Processing of meat cattle",Agriculture
+"Processing of meat pigs",Agriculture
+"Processing of meat poultry",Agriculture
+"Production of meat products nec",Agriculture
+"Processing vegetable oils and fats",Agriculture
+"Processing of dairy products",Agriculture
+"Processed rice",Agriculture
+"Sugar refining",Agriculture
+"Processing of Food products nec",Agriculture
+"Manufacture of beverages",Agriculture
+"Manufacture of fish products",Agriculture
+"Manufacture of tobacco products (16)",Agriculture
+"Manufacture of textiles (17)",Industry
+"Manufacture of wearing apparel; dressing and dyeing of fur (18)",Industry
+"Tanning and dressing of leather; manufacture of luggage, handbags, saddlery, harness and footwear (19)",Industry
+"Manufacture of wood and of products of wood and cork, except furniture; manufacture of articles of straw and plaiting materials (20)",Industry
+"Re-processing of secondary wood material into new wood material",Industry
+"Pulp",Industry
+"Re-processing of secondary paper into new pulp",Industry
+"Paper",Industry
+"Publishing, printing and reproduction of recorded media (22)",Industry
+"Manufacture of coke oven products",ET
+"Petroleum Refinery",ET
+"Processing of nuclear fuel",ET
+"Plastics, basic",Industry
+"Re-processing of secondary plastic into new plastic",Industry
+"N-fertiliser",Industry
+"P- and other fertiliser",Industry
+"Chemicals nec",Industry
+"Manufacture of rubber and plastic products (25)",Industry
+"Manufacture of glass and glass products",Industry
+"Re-processing of secondary glass into new glass",Industry
+"Manufacture of ceramic goods",Industry
+"Manufacture of bricks, tiles and construction products, in baked clay",Industry
+"Manufacture of cement, lime and plaster",Industry
+"Re-processing of ash into clinker",Industry
+"Manufacture of other non-metallic mineral products n.e.c.",Industry
+"Manufacture of basic iron and steel and of ferro-alloys and first products thereof",Industry
+"Re-processing of secondary steel into new steel",Industry
+"Precious metals production",Industry
+"Re-processing of secondary preciuos metals into new preciuos metals",Industry
+"Aluminium production",Industry
+"Re-processing of secondary aluminium into new aluminium",Industry
+"Lead, zinc and tin production",Industry
+"Re-processing of secondary lead into new lead, zinc and tin",Industry
+"Copper production",Industry
+"Re-processing of secondary copper into new copper",Industry
+"Other non-ferrous metal production",Industry
+"Re-processing of secondary other non-ferrous metals into new other non-ferrous metals",Industry
+"Casting of metals",Industry
+"Manufacture of fabricated metal products, except machinery and equipment (28)",Industry
+"Manufacture of machinery and equipment n.e.c. (29)",Equipment
+"Manufacture of office machinery and computers (30)",Industry
+"Manufacture of electrical machinery and apparatus n.e.c. (31)",Electrical equipment 
+"Manufacture of radio, television and communication equipment and apparatus (32)",Industry
+"Manufacture of medical, precision and optical instruments, watches and clocks (33)",Industry
+"Manufacture of motor vehicles, trailers and semi-trailers (34)",Vehicle
+"Manufacture of other transport equipment (35)",Industry
+"Manufacture of furniture; manufacturing n.e.c. (36)",Industry
+"Recycling of waste and scrap",Industry
+"Recycling of bottles by direct reuse",Industry
+"Production of electricity by coal",Power
+"Production of electricity by gas",Power
+"Production of electricity by nuclear",Power
+"Production of electricity by hydro",Power
+"Production of electricity by wind",Power
+"Production of electricity by petroleum and other oil derivatives",Power
+"Production of electricity by biomass and waste",Power
+"Production of electricity by solar photovoltaic",Power
+"Production of electricity by solar thermal",Power
+"Production of electricity by tide, wave, ocean",Power
+"Production of electricity by Geothermal",Power
+"Production of electricity nec",Power
+"Transmission of electricity",Power
+"Distribution and trade of electricity",Power
+"Manufacture of gas; distribution of gaseous fuels through mains",Gas
+"Steam and hot water supply",Services
+"Collection, purification and distribution of water (41)",Services
+"Construction (45)",Construction
+"Re-processing of secondary construction material into aggregates",Construction
+"Sale, maintenance, repair of motor vehicles, motor vehicles parts, motorcycles, motor cycles parts and accessoiries",Services
+"Retail sale of automotive fuel",ET
+"Wholesale trade and commission trade, except of motor vehicles and motorcycles (51)",Services
+"Retail trade, except of motor vehicles and motorcycles; repair of personal and household goods (52)",Services
+"Hotels and restaurants (55)",Services
+"Transport via railways",Land transport
+"Other land transport",Land transport
+"Transport via pipelines",Services
+"Sea and coastal water transport",Water transport
+"Inland water transport",Water transport
+"Air transport (62)",Air transport
+"Supporting and auxiliary transport activities; activities of travel agencies (63)",Services
+"Post and telecommunications (64)",Services
+"Financial intermediation, except insurance and pension funding (65)",Services
+"Insurance and pension funding, except compulsory social security (66)",Services
+"Activities auxiliary to financial intermediation (67)",Services
+"Real estate activities (70)",Services
+"Renting of machinery and equipment without operator and of personal and household goods (71)",Services
+"Computer and related activities (72)",Services
+"Research and development (73)",Services
+"Other business activities (74)",Services
+"Public administration and defence; compulsory social security (75)",Services
+"Education (80)",Services
+"Health and social work (85)",Services
+"Incineration of waste: Food",Industry
+"Incineration of waste: Paper",Industry
+"Incineration of waste: Plastic",Industry
+"Incineration of waste: Metals and Inert materials",Industry
+"Incineration of waste: Textiles",Industry
+"Incineration of waste: Wood",Industry
+"Incineration of waste: Oil/Hazardous waste",Industry
+"Biogasification of food waste, incl. land application",Gas
+"Biogasification of paper, incl. land application",Gas
+"Biogasification of sewage slugde, incl. land application",Gas
+"Composting of food waste, incl. land application",Industry
+"Composting of paper and wood, incl. land application",Industry
+"Waste water treatment, food",Industry
+"Waste water treatment, other",Industry
+"Landfill of waste: Food",Industry
+"Landfill of waste: Paper",Industry
+"Landfill of waste: Plastic",Industry
+"Landfill of waste: Inert/metal/hazardous",Industry
+"Landfill of waste: Textiles",Industry
+"Landfill of waste: Wood",Industry
+"Activities of membership organisation n.e.c. (91)",Services
+"Recreational, cultural and sporting activities (92)",Services
+"Other service activities (93)",Services
+"Private households with employed persons (95)",Services
+"Extra-territorial organizations and bodies",Services
