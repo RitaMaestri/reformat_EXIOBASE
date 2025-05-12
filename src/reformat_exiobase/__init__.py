@@ -7,5 +7,5 @@ Created on Tue Mar 18 19:18:50 2025
 """
 
 from .download_EXIOBASE import download_EXIOBASE
-from .reformat_EXIOBSE import reformat_EXIOBSE
+from .reformat_EXIOBSE import reformat_EXIOBASE
 from .aggregate_EXIOBASE import aggregate_EXIOBASE
