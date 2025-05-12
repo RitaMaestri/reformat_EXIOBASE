@@ -6,13 +6,15 @@ Created on Thu Mar 13 14:20:45 2025
 
 import pandas as pd
 import numpy as np
+from . import mappings
+import importlib.resources as pkg_resources
 
 #######################################################
 ########## CONVERT EXIOBASE TO GTAP FORMAT ############
 #######################################################
 
 
-def reformat_EXIOBASE(aggregation_folder, reformat_folder, map_final_demand_file, map_GTAP_file):
+def reformat_EXIOBASE(aggregation_folder, reformat_folder):
 
 
     F = pd.read_csv(f"{aggregation_folder}/factor_inputs/F.txt", delimiter="\t",
@@ -52,11 +54,15 @@ def reformat_EXIOBASE(aggregation_folder, reformat_folder, map_final_demand_file
     Y = reorder_io_rows(Y, sectors)
     Z = reorder_io_matrix(Z, sectors)
 
-    map_final_demand = pd.read_csv(map_final_demand_file)
-    map_GTAP_cost = pd.read_excel(
-        map_GTAP_file, sheet_name='Cost structure', header=None, index_col=None)
-    map_GTAP_cons = pd.read_excel(
-        map_GTAP_file, sheet_name='Consumption structure', header=None, index_col=None)
+
+
+    with pkg_resources.open_text(mappings, "map_reformat_EXIOBASE.csv") as f:
+        map_final_demand = pd.read_csv(f)
+
+    with pkg_resources.open_binary(mappings, "map_GTAP_format.xlsx") as f:
+        map_GTAP_cost = pd.read_excel(f, sheet_name='Cost structure', header=None)
+        f.seek(0)
+        map_GTAP_cons = pd.read_excel(f, sheet_name='Consumption structure', header=None)
 
     final_demand_categories_EXIOBASE = map_final_demand["EXIOBASE_name"].loc[map_final_demand["EXIOBASE_file"] == "Y"].unique()
     final_demand_categories_SCAF = map_final_demand["SCAF"].loc[map_final_demand["EXIOBASE_file"] == "Y"].unique()
@@ -69,7 +75,7 @@ def reformat_EXIOBASE(aggregation_folder, reformat_folder, map_final_demand_file
     ###########################
 
     # INTERMEDIATE DOMESTIC DEMAND
-    intermediate_dom = pd.DataFrame(0, index=sectors, columns=Z.columns)
+    intermediate_dom = pd.DataFrame(0, index=sectors, columns=Z.columns, dtype=np.float64)
     for r in regions:
         for s in sectors:
             intermediate_dom.loc[:, r] = Z.loc[
@@ -80,7 +86,7 @@ def reformat_EXIOBASE(aggregation_folder, reformat_folder, map_final_demand_file
             ].to_numpy()
 
     # INTERMEDIATE IMPORTS
-    intermediate_imp = pd.DataFrame(0, index=sectors, columns=Z.columns)
+    intermediate_imp = pd.DataFrame(0, index=sectors, columns=Z.columns, dtype=np.float64)
 
     for r in regions:
         for s in sectors:
@@ -110,7 +116,7 @@ def reformat_EXIOBASE(aggregation_folder, reformat_folder, map_final_demand_file
     final_demand_columns = pd.MultiIndex.from_tuples(
         zip_columns, names=["region", "category"])
 
-    fd_SCAF_cat = pd.DataFrame(0, index=Y.index, columns=final_demand_columns)
+    fd_SCAF_cat = pd.DataFrame(0, index=Y.index, columns=final_demand_columns, dtype=np.float64)
 
     for r in regions:
         for c in final_demand_categories_SCAF:
@@ -125,7 +131,7 @@ def reformat_EXIOBASE(aggregation_folder, reformat_folder, map_final_demand_file
     ###### FINAL DEMAND DOMESTIC ########
 
     fd_dom = pd.DataFrame(
-        0, index=Y.index, columns=final_demand_categories_SCAF)
+        0, index=Y.index, columns=final_demand_categories_SCAF, dtype=np.float64)
 
     for r in regions:
         for c in final_demand_categories_SCAF:
@@ -136,7 +142,7 @@ def reformat_EXIOBASE(aggregation_folder, reformat_folder, map_final_demand_file
     ####### FINAL DEMAND IMPORTS ########
 
     fd_imp = pd.DataFrame(
-        0, index=Y.index, columns=final_demand_categories_SCAF)
+        0, index=Y.index, columns=final_demand_categories_SCAF, dtype=np.float64)
 
     for r in regions:
         for c in final_demand_categories_SCAF:
@@ -159,7 +165,7 @@ def reformat_EXIOBASE(aggregation_folder, reformat_folder, map_final_demand_file
     final_demand_columns = pd.MultiIndex.from_tuples(
         zip_columns, names=["imp_dom", "category"])
 
-    fd = pd.DataFrame(0, index=Y.index, columns=final_demand_columns)
+    fd = pd.DataFrame(0, index=Y.index, columns=final_demand_columns, dtype=np.float64)
 
     for r in regions:
         for s in sectors:
@@ -189,14 +195,14 @@ def reformat_EXIOBASE(aggregation_folder, reformat_folder, map_final_demand_file
     # compute the shares of each agent over total domestic consumption #
 
     # total domestic consumption (w/o exports)
-    total_fd_wo_X = pd.DataFrame(0, index=sectors, columns=regions)
+    total_fd_wo_X = pd.DataFrame(0, index=sectors, columns=regions, dtype=np.float64)
 
     for r in regions:
         total_fd_wo_X[r] = fd.loc[r].sum(axis=1)
 
     # shares of domestic consumption per agent
     demand_shares = pd.DataFrame(
-        0, index=Z.columns, columns=distributed_cons_tax_columns)
+        0, index=Z.columns, columns=distributed_cons_tax_columns, dtype=np.float64)
 
     for r in regions:
         demand_shares.loc[r] = fd.loc[r].div(total_fd_wo_X[r], axis=0).values
@@ -205,7 +211,7 @@ def reformat_EXIOBASE(aggregation_folder, reformat_folder, map_final_demand_file
     consumption_taxes = F.loc["Taxes less subsidies on products purchased: Total"]
 
     distributed_cons_tax = pd.DataFrame(
-        0, index=Z.columns, columns=distributed_cons_tax_columns)
+        0, index=Z.columns, columns=distributed_cons_tax_columns, dtype=np.float64)
 
     for r in regions:
         distributed_cons_tax.loc[r] = demand_shares.loc[r].mul(
@@ -299,7 +305,7 @@ def reformat_EXIOBASE(aggregation_folder, reformat_folder, map_final_demand_file
 
     #### GROSS EXPORT ####
 
-    X = pd.DataFrame(0, index=Y.index, columns=["X"])
+    X = pd.DataFrame(0, index=Y.index, columns=["X"], dtype=np.float64)
 
     for r in regions:
         X.loc[r] = (
@@ -319,7 +325,7 @@ def reformat_EXIOBASE(aggregation_folder, reformat_folder, map_final_demand_file
         zip_columns, names=["region", "sector"])
 
     
-    M = pd.DataFrame(0, index=["M"], columns=M_columns)
+    M = pd.DataFrame(0, index=["M"], columns=M_columns, dtype=np.float64)
 
     for r in regions:
         M.loc["M", r] = (fd.loc[r, "imp"].sum(axis=1)).to_numpy()
@@ -372,7 +378,7 @@ def reformat_EXIOBASE(aggregation_folder, reformat_folder, map_final_demand_file
     col_index = pd.MultiIndex.from_frame(expanded_col_df.iloc[:, :2], names=[
                                          "Category", "Subcategory"])
 
-    reformat_df = pd.DataFrame(0, index=row_index, columns=col_index)
+    reformat_df = pd.DataFrame(0, index=row_index, columns=col_index, dtype=np.float64)
 
     ############################################
     ##### fill in the reformatted database #####

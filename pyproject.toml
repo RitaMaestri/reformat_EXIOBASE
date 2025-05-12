@@ -6,17 +6,17 @@ authors = [
     {name = "RitaMaestri",email = "maestri@smash.fr"}
 ]
 readme = "README.md"
-requires-python = ">=3.9"
-dependencies = [
-    { name = "numpy", version = "1.21.5" },
-    { name = "pandas", version = "1.4.4" },
-    { name = "pymrio", version = "0.5.4" }
-]
+requires-python = ">=3.10"
+
 
 [tool.poetry]
 packages = [{include = "reformat_exiobase", from = "src"}]
 
 
+[tool.poetry.dependencies]
+pandas = "^2.2.3"
+numpy = "^2.2.5"
+pymrio = "^0.5.4"
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
 build-backend = "poetry.core.masonry.api"
