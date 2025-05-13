@@ -14,8 +14,8 @@ packages = [{include = "reformat_exiobase", from = "src"}]
 
 
 [tool.poetry.dependencies]
-pandas = "^2.2.3"
-numpy = "^2.2.5"
+pandas = "^2.1.4"
+numpy = "^1.26.4"
 pymrio = "^0.5.4"
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
