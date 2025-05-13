@@ -29,9 +29,11 @@ p_or_i = "pxp"
 
 version = "10.5281/zenodo.3583070" # version released in february 2025
 
+secotrs_order= ["AGRICULTURE","MANUFACTURE","SERVICES","STEEL","CHEMICAL","ENERGY","TRANSPORTATION"]
 
-download_EXIOBASE(str(download_path))
 
-aggregate_EXIOBASE(reg_map_path=str(reg_map_file), sec_map_path=str(sec_map_file), output_path=str(aggregation_path), input_path=str(download_path), year=year, system=p_or_i)
+#download_EXIOBASE(str(download_path))
 
-reformat_EXIOBASE(aggregation_folder=str(aggregation_path), reformat_folder=str(reformat_path))
+#aggregate_EXIOBASE(reg_map_path=str(reg_map_file), sec_map_path=str(sec_map_file), output_path=str(aggregation_path), input_path=str(download_path), year=year, system=p_or_i)
+
+reformat_EXIOBASE(aggregation_folder=str(aggregation_path), reformat_folder=str(reformat_path), sectors_order=secotrs_order)

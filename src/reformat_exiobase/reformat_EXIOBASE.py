@@ -14,7 +14,7 @@ import importlib.resources as pkg_resources
 #######################################################
 
 
-def reformat_EXIOBASE(aggregation_folder, reformat_folder):
+def reformat_EXIOBASE(aggregation_folder, reformat_folder, sectors_order=[]):
 
 
     F = pd.read_csv(f"{aggregation_folder}/factor_inputs/F.txt", delimiter="\t",
@@ -24,8 +24,14 @@ def reformat_EXIOBASE(aggregation_folder, reformat_folder):
     Y = pd.read_csv(f"{aggregation_folder}/Y.txt", delimiter="\t",
                     header=[0, 1], index_col=[0, 1])  # final demand
 
+
     regions = F.columns.get_level_values(0).unique()
-    sectors = F.columns.get_level_values(1).unique()
+
+    if sectors_order == []:
+        sectors = F.columns.get_level_values(1).unique()
+    else:
+        sectors = sectors_order
+
 
     def reorder_io_columns(df, desired_sector_order):
         order_map = {sector: i for i,
