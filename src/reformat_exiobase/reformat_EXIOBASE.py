@@ -8,6 +8,8 @@ import pandas as pd
 import numpy as np
 from . import mappings
 import importlib.resources as pkg_resources
+from scipy.optimize import least_squares
+
 
 #######################################################
 ########## CONVERT EXIOBASE TO GTAP FORMAT ############
@@ -26,6 +28,7 @@ def reformat_EXIOBASE(aggregation_folder, reformat_folder, sectors_order=[]):
 
 
     regions = F.columns.get_level_values(0).unique()
+    
 
     if sectors_order == []:
         sectors = F.columns.get_level_values(1).unique()
@@ -70,44 +73,60 @@ def reformat_EXIOBASE(aggregation_folder, reformat_folder, sectors_order=[]):
         f.seek(0)
         map_GTAP_cons = pd.read_excel(f, sheet_name='Consumption structure', header=None)
 
-    final_demand_categories_EXIOBASE = map_final_demand["EXIOBASE_name"].loc[map_final_demand["EXIOBASE_file"] == "Y"].unique()
-    final_demand_categories_SCAF = map_final_demand["SCAF"].loc[map_final_demand["EXIOBASE_file"] == "Y"].unique()
-
-    factors_categories_SCAF = map_final_demand["SCAF"].loc[map_final_demand["EXIOBASE_file"] == "F"].unique()
-    factors_categories_EXIOBASE = map_final_demand["EXIOBASE_name"].loc[map_final_demand["EXIOBASE_file"] == "F"].unique()
+    final_demand_agents_SCAF = map_final_demand["SCAF"].loc[map_final_demand["EXIOBASE_file"] == "Y"].unique()
     
+
     ###########################
     ### INTERMEDIATE DEMAND ###
     ###########################
 
+    def EXIOBASE_name(SCAF_name):
+        return map_final_demand.loc[map_final_demand['SCAF'] == SCAF_name, 'EXIOBASE_name'].values
+
     # INTERMEDIATE DOMESTIC DEMAND
-    intermediate_dom = pd.DataFrame(0, index=sectors, columns=Z.columns, dtype=np.float64)
-    for r in regions:
-        for s in sectors:
-            intermediate_dom.loc[:, r] = Z.loc[
-                # Filter rows where region is r and sector is s
-                (Z.index.get_level_values(0) == r),
-                # Filter columns where region is r
-                Z.columns.get_level_values(0) == r
-            ].to_numpy()
+    def compute_intermediate_domestic_demand(Z):
+        regions = Z.columns.get_level_values(0).unique()
+        sectors = Z.index.get_level_values(1).unique()
 
-    # INTERMEDIATE IMPORTS
-    intermediate_imp = pd.DataFrame(0, index=sectors, columns=Z.columns, dtype=np.float64)
+        intermediate_dom = pd.DataFrame(0.0, index=sectors, columns=Z.columns)
 
-    for r in regions:
-        for s in sectors:
-            intermediate_imp.loc[s, r] = Z.loc[
-                # Filter rows where region is NOT r and sector is s
-                (Z.index.get_level_values(0) != r) & (
-                    Z.index.get_level_values(1) == s),
-                # Filter columns where region IS r
-                Z.columns.get_level_values(0) == r
-            ].sum().array
+        for r in regions:
+            for s in sectors:
+                # Filter: rows where region == r and sector == s, columns where region == r
+                intermediate_dom.loc[s, intermediate_dom.columns.get_level_values(0) == r] = Z.loc[
+                    (Z.index.get_level_values(0) == r) & (Z.index.get_level_values(1) == s),
+                    Z.columns.get_level_values(0) == r
+                ].to_numpy()
+
+        return intermediate_dom
+    
+    def compute_intermediate_imports(Z):
+        regions = Z.columns.get_level_values(0).unique()
+        sectors = Z.index.get_level_values(1).unique()
+
+        intermediate_imp = pd.DataFrame(0.0, index=sectors, columns=Z.columns)
+
+        for r in regions:
+            for s in sectors:
+                # Rows: region != r and sector == s; Columns: region == r
+                intermediate_imp.loc[s, intermediate_imp.columns.get_level_values(0) == r] = Z.loc[
+                    (Z.index.get_level_values(0) != r) & (Z.index.get_level_values(1) == s),
+                    Z.columns.get_level_values(0) == r
+                ].sum().to_numpy()
+
+        return intermediate_imp
+
+
+
+
+
+
+
 
     ### TOTAL INTERMEDIATE DEMAND ###
 
 
-    intermediate_tot = intermediate_dom + intermediate_imp
+
 
     ############################
     ####### FINAL DEMAND #######
@@ -115,193 +134,268 @@ def reformat_EXIOBASE(aggregation_folder, reformat_folder, sectors_order=[]):
 
     # final demand with SCAF categories C,G,I; bilateral trade
 
-    # create multi index for new dataframe
-    region_index = regions.repeat(len(final_demand_categories_SCAF))
-    category_index = np.tile(final_demand_categories_SCAF, len(regions))
-    zip_columns = list(zip(*[region_index, category_index]))
-    final_demand_columns = pd.MultiIndex.from_tuples(
-        zip_columns, names=["region", "category"])
 
-    fd_SCAF_cat = pd.DataFrame(0, index=Y.index, columns=final_demand_columns, dtype=np.float64)
+    def aggregate_final_demand_agents(Y, final_demand_agents_SCAF):
+        regions = Y.columns.get_level_values("region").unique()
 
-    for r in regions:
-        for c in final_demand_categories_SCAF:
-            EXIOBASE_categories = map_final_demand.loc[map_final_demand['SCAF']
-                                                       == c, 'EXIOBASE_name'].values
+        # Create MultiIndex for columns: (region, category)
+        region_index = np.repeat(regions, len(final_demand_agents_SCAF))
+        category_index = np.tile(final_demand_agents_SCAF, len(regions))
+        zip_columns = list(zip(region_index, category_index))
+        final_demand_columns = pd.MultiIndex.from_tuples(zip_columns, names=["region", "category"])
 
-            fd_SCAF_cat.loc[:, (r, c)] = Y.loc[
-                :,  # all rows
-                (r, EXIOBASE_categories)
-            ].sum(axis=1)
+        # Initialize empty DataFrame for SCAF final demand
+        final_demand_aggregated_agents = pd.DataFrame(0.0, index=Y.index, columns=final_demand_columns)
+
+        # Fill in the SCAF final demand by summing over mapped EXIOBASE categories
+        for r in regions:
+            for c in final_demand_agents_SCAF:
+                EXIOBASE_categories = EXIOBASE_name(c)  # Map SCAF category to EXIOBASE ones
+
+                final_demand_aggregated_agents.loc[:, (r, c)] = Y.loc[
+                    :, 
+                    (r, EXIOBASE_categories)
+                ].sum(axis=1)
+
+        return final_demand_aggregated_agents
+    
 
     ###### FINAL DEMAND DOMESTIC ########
 
-    fd_dom = pd.DataFrame(
-        0, index=Y.index, columns=final_demand_categories_SCAF, dtype=np.float64)
 
-    for r in regions:
-        for c in final_demand_categories_SCAF:
-            fd_dom.loc[r, c] = fd_SCAF_cat.loc[
-                (fd_SCAF_cat.index.get_level_values(0) == r),
-                (fd_SCAF_cat.columns.get_level_values(0) == r) & (fd_SCAF_cat.columns.get_level_values(1) == c)].to_numpy()
+
+    def compute_final_demand_domestic(fd_aggregated_agents):
+        # Extract region and category levels from the column MultiIndex
+        regions = fd_aggregated_agents.columns.get_level_values("region").unique()
+        categories = fd_aggregated_agents.columns.get_level_values("category").unique()
+
+        # Create output DataFrame with same index but single-level columns (categories only)
+        fd_dom = pd.DataFrame(
+            0.0,
+            index=fd_aggregated_agents.index,
+            columns=categories
+        )
+
+        for region in regions:
+            # Filter: rows and columns that belong to the current region
+            is_region_row = fd_aggregated_agents.index.get_level_values("region") == region
+            is_region_col = fd_aggregated_agents.columns.get_level_values("region") == region
+
+            # Extract the sub-DataFrame for this region and drop the 'region' level from columns
+            regional_data = fd_aggregated_agents.loc[is_region_row, is_region_col]
+            regional_data.columns = regional_data.columns.droplevel("region")
+
+            # Assign the region-specific data into the corresponding rows of the result
+            fd_dom.loc[is_region_row, :] = regional_data
+
+        return fd_dom
 
     ####### FINAL DEMAND IMPORTS ########
 
-    fd_imp = pd.DataFrame(
-        0, index=Y.index, columns=final_demand_categories_SCAF, dtype=np.float64)
 
-    for r in regions:
-        for c in final_demand_categories_SCAF:
-            for s in sectors:
-                fd_imp.loc[(r, s), c] = fd_SCAF_cat.loc[
-                    (fd_SCAF_cat.index.get_level_values(0) != r) & (fd_SCAF_cat.index.get_level_values(1) == s),
-                    (fd_SCAF_cat.columns.get_level_values(0) == r) & (fd_SCAF_cat.columns.get_level_values(1) == c)
-                    ].sum().item()
+    def compute_final_demand_imported(fd_aggregated_agents):
+        # Extract levels from MultiIndex
+        regions = fd_aggregated_agents.columns.get_level_values("region").unique()
+        categories = fd_aggregated_agents.columns.get_level_values("category").unique()
+        sectors = fd_aggregated_agents.index.get_level_values("sector").unique()
+
+        # Initialize the output DataFrame
+        fd_imp = pd.DataFrame(
+            0.0, 
+            index=fd_aggregated_agents.index, 
+            columns=categories, 
+            dtype=np.float64
+        )
+        # Loop over each region, category, and sector
+        for region in regions:
+            for category in categories:
+                for sector in sectors:
+                    # Mask for all rows with a different region and the current sector
+                    row_mask = (
+                        (fd_aggregated_agents.index.get_level_values("region") != region) &
+                        (fd_aggregated_agents.index.get_level_values("sector") == sector)
+                    )
+
+                    # Mask for columns matching current region and category
+                    col_mask = (
+                        (fd_aggregated_agents.columns.get_level_values("region") == region) &
+                        (fd_aggregated_agents.columns.get_level_values("category") == category)
+                    )
+
+                    # Sum over foreign demand and assign to output
+                    value = fd_aggregated_agents.loc[row_mask, col_mask].sum().item()
+                    fd_imp.loc[(region, sector), category] = value
+
+        return fd_imp
+
+    
 
     # CONCATENATE IN THE FORMAT: INTERMEDIATE IMP + INTERMEDIATE DOM + FINAL IMP + FINAL DOM
 
     # create ordered columns names
 
-    imp_dom_index = np.concatenate([["imp"]*len(sectors), ["dom"]*len(
-        sectors), ["imp", "dom"]*len(final_demand_categories_SCAF)], axis=None)
-    category_index = np.concatenate(
-        (sectors, sectors, final_demand_categories_SCAF.repeat(2)), axis=None)
+    def assemble_total_demand(fd_dom, fd_imp, intermediate_dom, intermediate_imp):
 
-    zip_columns = list(zip(*[imp_dom_index, category_index]))
-    final_demand_columns = pd.MultiIndex.from_tuples(
-        zip_columns, names=["imp_dom", "category"])
+        # Extract shared regions and categories
+        regions = fd_dom.index.get_level_values("region").unique()
+        sectors = fd_dom.index.get_level_values("sector").unique()
+        final_demand_agents = fd_dom.columns
 
-    fd = pd.DataFrame(0, index=Y.index, columns=final_demand_columns, dtype=np.float64)
+        # Build MultiIndex for columns: ("imp"/"dom", category)
+        imp_dom_index = (
+            ["imp"] * len(sectors) + ["dom"] * len(sectors) +
+            ["imp", "dom"] * len(final_demand_agents)
+        )
+        category_index = (
+            list(sectors) * 2 + list(np.repeat(final_demand_agents, 2))
+        )
+        column_tuples = list(zip(imp_dom_index, category_index))
+        final_columns = pd.MultiIndex.from_tuples(column_tuples, names=["imp_dom", "category"])
+
+        # Initialize output DataFrame
+        fd = pd.DataFrame(0.0, index=fd_dom.index, columns=final_columns)
+
+        for r in regions:
+            for s in sectors:
+                fd.loc[r, ("imp", s)] = intermediate_imp.loc[:, (r, s)].to_numpy()
+                fd.loc[r, ("dom", s)] = intermediate_dom.loc[:, (r, s)].to_numpy()
+            for c in final_demand_agents_SCAF:
+                fd.loc[r, ("imp", c)] = fd_imp.loc[r, c].to_numpy()
+                fd.loc[r, ("dom", c)] = fd_dom.loc[r, c].to_numpy()
+        return fd
+    
+
+
+
+
+    intermediate_dom = compute_intermediate_domestic_demand(Z)
+
+    intermediate_imp = compute_intermediate_imports(Z)
+
+    final_demand_all_regions = aggregate_final_demand_agents(Y,final_demand_agents_SCAF)
+
+    fd_dom=compute_final_demand_domestic(final_demand_all_regions)
+
+    fd_imp = compute_final_demand_imported(final_demand_all_regions)
+
+
+    total_demand = assemble_total_demand(fd_dom, fd_imp, intermediate_dom, intermediate_imp)
+    fd=total_demand
+
+
+
+
+    ###################################################
+    ##### REALLOCATION OF TAXES ON CONSUMPTION ########
+    ###################################################
+
+    #the taxes on consumption in the file F.txt for region R and sector S include 
+    #taxes that are paid abroad for the consumption of the good S produced in R.
+    # we extract: 
+    # -import and export net of taxes.
+    # -the tax that is paid on good S consumed in region R and of all origin.
+    # the resulting national account is balanced
+
+    def disaggregate_tax(tax_shares,Z,Y):
+    
+        tot_dem = pd.concat([Z, Y], axis=1)
+        tot_dem.columns = tot_dem.columns.set_names('category', level=1)
+
+
+        taxes_df = pd.DataFrame(0, index=tot_dem.index, columns=tot_dem.columns, dtype=np.float64)
+
+        investment_sector_name = EXIOBASE_name("I")
+
+        row_sector_labels = taxes_df.index.get_level_values('sector')
+        col_region_labels = taxes_df.columns.get_level_values('region')
+
+        for (r_ts, s_ts), tax_val in tax_shares.items():
+
+            row_mask = (row_sector_labels == s_ts)
+
+            col_mask = (col_region_labels == r_ts) & \
+            (~taxes_df.columns.get_level_values(1).isin(investment_sector_name))
+
+            taxes_df.loc[row_mask, col_mask] = tax_val
+
+        tax_df = taxes_df * tot_dem
+
+        return tax_df
+
+    def disaggregate_tax_adjusted(tax_shares, Z, Y):
+        tot_dem = pd.concat([Z, Y], axis=1)
+        taxes_df = pd.DataFrame(0.0, index=tot_dem.index, columns=tot_dem.columns)
+
+        investment_sector_name = EXIOBASE_name("I")
+
+        row_sector_labels = taxes_df.index.get_level_values('sector')
+        col_region_labels = taxes_df.columns.get_level_values('region')
+        col_sector_labels = taxes_df.columns.get_level_values(1)
+        
+        sectors=np.unique(row_sector_labels)
+
+        for (r_ts, s_ts), tax_val in tax_shares.items():
+            # select the production sector
+            row_mask = (row_sector_labels == s_ts)
+
+            # select the consumers that face the same tax rate
+            col_mask = (
+                # tax rates on each product are specific to the consumption region
+                (col_region_labels == r_ts) &
+                #investment sector doesn't pay consumption taxes
+                (~col_sector_labels.isin(investment_sector_name)) &
+                #steel is not consumed by final consumers so I set the tax to zero for final consumption of steel
+                (col_sector_labels.isin(sectors) | (s_ts != "STEEL"))
+            )
+
+            taxes_df.loc[row_mask, col_mask] = tax_val
+
+        tax_df = taxes_df * tot_dem
+
+        return tax_df
+
+    
+
+    def reallocate_tax(tax_shares_values, tax_shares_indexes, Z, Y, F):
+        tax_shares = pd.Series(tax_shares_values, index=tax_shares_indexes)
+        
+        tax_df = disaggregate_tax_adjusted(tax_shares,Z,Y)
+
+        computed_TLSP = tax_df.sum(axis=1)
+
+        zero = F.loc[EXIOBASE_name("Consumption_taxes")] - computed_TLSP
+
+        return zero.values[0]
+    
+    
+    tax_shares_guess = pd.Series(0.01, index=Z.columns)
+
+    minimization = least_squares(reallocate_tax, tax_shares_guess.values, args=(tax_shares_guess.index,Z, Y, F),verbose=2)
+
+    tax_shares_solution = pd.Series(minimization.x, index=Z.columns)
+
+    taxes_df = disaggregate_tax(tax_shares_solution,Z,Y)
+
+    net_flows = pd.concat([Z, Y], axis=1) - taxes_df
+
+    ######################
+    #### TOTAL IMPORT ####
+    ######################
+
+    region_index = regions.repeat(len(sectors))
+    sector_index = np.tile(sectors, len(regions))
+    zip_columns = list(zip(*[region_index, sector_index]))
+    M_columns = pd.MultiIndex.from_tuples(
+        zip_columns, names=["region", "sector"])
+
+
+    M = pd.DataFrame(0, index=["M"], columns=M_columns, dtype=np.float64)
 
     for r in regions:
         for s in sectors:
-            fd.loc[r, ("imp", s)] = intermediate_imp.loc[:, (r, s)].to_numpy()
-            fd.loc[r, ("dom", s)] = intermediate_dom.loc[:, (r, s)].to_numpy()
-        for c in final_demand_categories_SCAF:
-            fd.loc[r, ("imp", c)] = fd_imp.loc[r, c].to_numpy()
-            fd.loc[r, ("dom", c)] = fd_dom.loc[r, c].to_numpy()
-
-    ###############################
-    #### TAXES ON CONSUMPTION #####
-    ###############################
-
-    ## the aggregated consumption taxes are distributed among consumers proportionally to their actual consumption (fixed tax rate hypthesis)##
-
-    # format an index that, if transposed, can be concatenated to the cost structure
-
-    imp_dom_index = np.concatenate([["imp"]*len(sectors), ["dom"]*len(
-        sectors), ["imp", "dom"]*len(final_demand_categories_SCAF)], axis=None)
-    category_index = np.concatenate(
-        (sectors, sectors, final_demand_categories_SCAF.repeat(2)), axis=None)
-
-    zip_columns = list(zip(*[imp_dom_index, category_index]))
-    distributed_cons_tax_columns = pd.MultiIndex.from_tuples(
-        zip_columns, names=["imp_dom", "category"])
-
-    # compute the shares of each agent over total domestic consumption #
-
-    # total domestic consumption (w/o exports)
-    total_fd_wo_X = pd.DataFrame(0, index=sectors, columns=regions, dtype=np.float64)
-
-    for r in regions:
-        total_fd_wo_X[r] = fd.loc[r].sum(axis=1)
-
-    # shares of domestic consumption per agent
-    demand_shares = pd.DataFrame(
-        0, index=Z.columns, columns=distributed_cons_tax_columns, dtype=np.float64)
-
-    for r in regions:
-        demand_shares.loc[r] = fd.loc[r].div(total_fd_wo_X[r], axis=0).values
-
-    # distribute consumption taxes
-    consumption_taxes = F.loc["Taxes less subsidies on products purchased: Total"]
-
-    distributed_cons_tax = pd.DataFrame(
-        0, index=Z.columns, columns=distributed_cons_tax_columns, dtype=np.float64)
-
-    for r in regions:
-        distributed_cons_tax.loc[r] = demand_shares.loc[r].mul(
-            consumption_taxes[r], axis=0).values
-        ### test ###
-
-        distributed_cons_tax.loc[r].sum(axis=1)-consumption_taxes[r] < 10e-6
-
-    ######################################
-    ## disaggregate each consumer's tax ##
-    ######################################
-
-    imp_intermediate_cons_tax = distributed_cons_tax.loc[:,
-                                                         (distributed_cons_tax.columns.get_level_values("imp_dom") == 'imp') &
-                                                         (distributed_cons_tax.columns.get_level_values(
-                                                             "category").isin(sectors))
-                                                         ].T
-
-    dom_intermediate_cons_tax = distributed_cons_tax.loc[:,
-                                                         (distributed_cons_tax.columns.get_level_values("imp_dom") == 'dom') &
-                                                         (distributed_cons_tax.columns.get_level_values(
-                                                             "category").isin(sectors))
-                                                         ].T
-
-    imp_C_cons_tax = distributed_cons_tax.loc[:,
-                                              (distributed_cons_tax.columns.get_level_values("imp_dom") == 'imp') &
-                                              (distributed_cons_tax.columns.get_level_values(
-                                                  "category") == "C")
-                                              ].T
-
-    dom_C_cons_tax = distributed_cons_tax.loc[:,
-                                              (distributed_cons_tax.columns.get_level_values("imp_dom") == 'dom') &
-                                              (distributed_cons_tax.columns.get_level_values(
-                                                  "category") == "C")
-                                              ].T
-
-    imp_G_cons_tax = distributed_cons_tax.loc[:,
-                                              (distributed_cons_tax.columns.get_level_values("imp_dom") == 'imp') &
-                                              (distributed_cons_tax.columns.get_level_values(
-                                                  "category") == "G")
-                                              ].T
-
-    dom_G_cons_tax = distributed_cons_tax.loc[:,
-                                              (distributed_cons_tax.columns.get_level_values("imp_dom") == 'dom') &
-                                              (distributed_cons_tax.columns.get_level_values(
-                                                  "category") == "G")
-                                              ].T
-
-    imp_I_cons_tax = distributed_cons_tax.loc[:,
-                                              (distributed_cons_tax.columns.get_level_values("imp_dom") == 'imp') &
-                                              (distributed_cons_tax.columns.get_level_values(
-                                                  "category") == "I")
-                                              ].T
-
-    dom_I_cons_tax = distributed_cons_tax.loc[:,
-                                              (distributed_cons_tax.columns.get_level_values("imp_dom") == 'dom') &
-                                              (distributed_cons_tax.columns.get_level_values(
-                                                  "category") == "I")
-                                              ].T
-
-    ################################
-    ##### TAXES ON PRODUCTION ######
-    ################################
-
-    production_taxes_raw = F.loc["Other net taxes on production"]
-    # reshape to row vector
-    production_taxes = production_taxes_raw.to_frame().T
-
-    ################################
-    ######### VALUE ADDED ##########
-    ################################
-
-    L_raw = F.loc[map_final_demand.loc[map_final_demand["SCAF"]
-                                       == "L", "EXIOBASE_name"]].sum(axis=0)
-    K_raw = F.loc[map_final_demand.loc[map_final_demand["SCAF"]
-                                       == "K", "EXIOBASE_name"]].sum(axis=0)
-    R_raw = F.loc[map_final_demand.loc[map_final_demand["SCAF"]
-                                       == "R", "EXIOBASE_name"]].sum(axis=0)
-
-    L = L_raw.to_frame().T.rename(index={0: 'L'})
-    K = K_raw.to_frame().T.rename(index={0: 'K'})
-    R = R_raw.to_frame().T.rename(index={0: 'R'})
-
-    VA = pd.concat([L, K, R])
+            rows = (net_flows.index.get_level_values(0) != r) & (net_flows.index.get_level_values(1) == s)
+            cols = net_flows.columns.get_level_values(0) == r
+            M.loc["M",(r, s)] = ( net_flows.loc[(rows),(cols)].sum().sum() )
 
     ################################
     ########## EXPORT ##############
@@ -315,26 +409,150 @@ def reformat_EXIOBASE(aggregation_folder, reformat_folder, sectors_order=[]):
 
     for r in regions:
         X.loc[r] = (
-            Z.loc[(Z.index.get_level_values(0) == r, Z.columns.get_level_values(0) != r)].sum(axis=1) +
-            Y.loc[Y.index.get_level_values(
-                0) == r, Y.columns.get_level_values(0) != r].sum(axis=1)
+            net_flows.loc[(net_flows.index.get_level_values(0) == r, net_flows.columns.get_level_values(0) != r)].sum(axis=1)
         ).to_numpy().reshape(-1, 1)
 
-    ######################
-    #### TOTAL IMPORT ####
-    ######################
 
-    region_index = regions.repeat(len(sectors))
-    sector_index = np.tile(sectors, len(regions))
-    zip_columns = list(zip(*[region_index, sector_index]))
-    M_columns = pd.MultiIndex.from_tuples(
-        zip_columns, names=["region", "sector"])
-
+    ##################################################
+    ##### ALLOCATE CONSUMPTION TAXES TO CONSUMERS ####
+    ##################################################
     
-    M = pd.DataFrame(0, index=["M"], columns=M_columns, dtype=np.float64)
+    imp_intermediate_cons_tax = compute_intermediate_imports(taxes_df[Z.columns]).T
+    dom_intermediate_cons_tax = compute_intermediate_domestic_demand(taxes_df[Z.columns]).T
+    
+    final_consumers_taxes_all_regions = aggregate_final_demand_agents(taxes_df[Y.columns],final_demand_agents_SCAF)
+    
+    fd_taxes_imp = compute_final_demand_imported(final_consumers_taxes_all_regions)
+    fd_taxes_dom=compute_final_demand_domestic(final_consumers_taxes_all_regions)
 
-    for r in regions:
-        M.loc["M", r] = (fd.loc[r, "imp"].sum(axis=1)).to_numpy()
+    imp_C_cons_tax = fd_taxes_imp["C"].to_frame().T
+    dom_C_cons_tax = fd_taxes_dom["C"].to_frame().T
+    imp_G_cons_tax = fd_taxes_imp["G"].to_frame().T
+    dom_G_cons_tax = fd_taxes_dom["G"].to_frame().T
+    imp_I_cons_tax = fd_taxes_imp["I"].to_frame().T
+    dom_I_cons_tax = fd_taxes_dom["I"].to_frame().T
+
+    # ###############################
+    # #### TAXES ON CONSUMPTION #####
+    # ###############################
+
+    # # the aggregated consumption taxes are distributed among consumers proportionally to their actual consumption (fixed tax rate hypthesis)##
+
+    # #format an index that, if transposed, can be concatenated to the cost structure
+
+    # imp_dom_index = np.concatenate([["imp"]*len(sectors), ["dom"]*len(
+    #     sectors), ["imp", "dom"]*len(final_demand_agents_SCAF)], axis=None)
+    # category_index = np.concatenate(
+    #     (sectors, sectors, final_demand_agents_SCAF.repeat(2)), axis=None)
+
+    # zip_columns = list(zip(*[imp_dom_index, category_index]))
+    # distributed_cons_tax_columns = pd.MultiIndex.from_tuples(
+    #     zip_columns, names=["imp_dom", "category"])
+
+    # # compute the shares of each agent over total domestic consumption #
+
+    # # total domestic consumption (w/o exports)
+    # total_fd_wo_X = pd.DataFrame(0, index=sectors, columns=regions, dtype=np.float64)
+
+    # for r in regions:
+    #     total_fd_wo_X[r] = fd.loc[r].sum(axis=1)
+
+    # # shares of domestic consumption per agent
+    # demand_shares = pd.DataFrame(
+    #     0, index=Z.columns, columns=distributed_cons_tax_columns, dtype=np.float64)
+
+    # for r in regions:
+    #     demand_shares.loc[r] = fd.loc[r].div(total_fd_wo_X[r], axis=0).values
+
+    # # distribute consumption taxes
+    # consumption_taxes = F.loc["Taxes less subsidies on products purchased: Total"]
+
+    # distributed_cons_tax = pd.DataFrame(
+    #     0, index=Z.columns, columns=distributed_cons_tax_columns, dtype=np.float64)
+
+    # for r in regions:
+    #     distributed_cons_tax.loc[r] = demand_shares.loc[r].mul(
+    #         consumption_taxes[r], axis=0).values
+    #     ### test ###
+
+    #     distributed_cons_tax.loc[r].sum(axis=1)-consumption_taxes[r] < 10e-6
+
+    # ######################################
+    # ## disaggregate each consumer's tax ##
+    # ######################################
+
+    # imp_intermediate_cons_tax = distributed_cons_tax.loc[:,
+    #                                                      (distributed_cons_tax.columns.get_level_values("imp_dom") == 'imp') &
+    #                                                      (distributed_cons_tax.columns.get_level_values(
+    #                                                          "category").isin(sectors))
+    #                                                      ].T
+
+    # dom_intermediate_cons_tax = distributed_cons_tax.loc[:,
+    #                                                      (distributed_cons_tax.columns.get_level_values("imp_dom") == 'dom') &
+    #                                                      (distributed_cons_tax.columns.get_level_values(
+    #                                                          "category").isin(sectors))
+    #                                                      ].T
+
+    # imp_C_cons_tax = distributed_cons_tax.loc[:,
+    #                                           (distributed_cons_tax.columns.get_level_values("imp_dom") == 'imp') &
+    #                                           (distributed_cons_tax.columns.get_level_values(
+    #                                               "category") == "C")
+    #                                           ].T
+
+    # dom_C_cons_tax = distributed_cons_tax.loc[:,
+    #                                           (distributed_cons_tax.columns.get_level_values("imp_dom") == 'dom') &
+    #                                           (distributed_cons_tax.columns.get_level_values(
+    #                                               "category") == "C")
+    #                                           ].T
+
+    # imp_G_cons_tax = distributed_cons_tax.loc[:,
+    #                                           (distributed_cons_tax.columns.get_level_values("imp_dom") == 'imp') &
+    #                                           (distributed_cons_tax.columns.get_level_values(
+    #                                               "category") == "G")
+    #                                           ].T
+
+    # dom_G_cons_tax = distributed_cons_tax.loc[:,
+    #                                           (distributed_cons_tax.columns.get_level_values("imp_dom") == 'dom') &
+    #                                           (distributed_cons_tax.columns.get_level_values(
+    #                                               "category") == "G")
+    #                                           ].T
+
+    # imp_I_cons_tax = distributed_cons_tax.loc[:,
+    #                                           (distributed_cons_tax.columns.get_level_values("imp_dom") == 'imp') &
+    #                                           (distributed_cons_tax.columns.get_level_values(
+    #                                               "category") == "I")
+    #                                           ].T
+
+    # dom_I_cons_tax = distributed_cons_tax.loc[:,
+    #                                           (distributed_cons_tax.columns.get_level_values("imp_dom") == 'dom') &
+    #                                           (distributed_cons_tax.columns.get_level_values(
+    #                                               "category") == "I")
+    #                                           ].T
+
+    ################################
+    ##### TAXES ON PRODUCTION ######
+    ################################
+
+    production_taxes_raw = F.loc["Other net taxes on production"]
+    # reshape to row vector
+    production_taxes = production_taxes_raw.to_frame().T
+
+    ################################
+    ######### VALUE ADDED ##########
+    ################################
+
+    L_raw = F.loc[EXIOBASE_name("L")].sum(axis=0)
+    K_raw = F.loc[EXIOBASE_name("K")].sum(axis=0)
+    R_raw = F.loc[EXIOBASE_name("R")].sum(axis=0)
+
+    L = L_raw.to_frame().T.rename(index={0: 'L'})
+    K = K_raw.to_frame().T.rename(index={0: 'K'})
+    R = R_raw.to_frame().T.rename(index={0: 'R'})
+
+    VA = pd.concat([L, K, R])
+
+
+
 
 
                                                             ##########################################
@@ -509,15 +727,15 @@ def reformat_EXIOBASE(aggregation_folder, reformat_folder, sectors_order=[]):
 
         # cons taxes
         row_start = fill_reformat_df_row_wise(
-            df_dict[r], row_start, imp_intermediate_cons_tax[r], col_start, col_end)
+            df_dict[r], row_start, imp_intermediate_cons_tax.loc[r], col_start, col_end)
         row_start = fill_reformat_df_row_wise(
-            df_dict[r], row_start, imp_intermediate_cons_tax[r].sum(axis=0), col_start, col_end)
+            df_dict[r], row_start, imp_intermediate_cons_tax.loc[r].sum(axis=0), col_start, col_end)
         row_start = fill_reformat_df_row_wise(
-            df_dict[r], row_start, dom_intermediate_cons_tax[r], col_start, col_end)
+            df_dict[r], row_start, dom_intermediate_cons_tax.loc[r], col_start, col_end)
         row_start = fill_reformat_df_row_wise(
-            df_dict[r], row_start, dom_intermediate_cons_tax[r].sum(axis=0), col_start, col_end)
+            df_dict[r], row_start, dom_intermediate_cons_tax.loc[r].sum(axis=0), col_start, col_end)
         row_start = fill_reformat_df_row_wise(df_dict[r], row_start, pd.concat(
-            [imp_intermediate_cons_tax[r], dom_intermediate_cons_tax[r]]).sum(axis=0), col_start, col_end)
+            [imp_intermediate_cons_tax.loc[r], dom_intermediate_cons_tax.loc[r]]).sum(axis=0), col_start, col_end)
 
         row_start = fill_reformat_df_row_wise(
             df_dict[r], row_start, imp_I_cons_tax[r], col_start, col_end)
@@ -566,27 +784,27 @@ def reformat_EXIOBASE(aggregation_folder, reformat_folder, sectors_order=[]):
 
         # C
         col_start = fill_reformat_df_columnwise(
-            df_dict[r], col_start, fd.loc[r, ("imp", "C")], row_start, row_end)
+            df_dict[r], col_start, total_demand.loc[r, ("imp", "C")], row_start, row_end)
         col_start = fill_reformat_df_columnwise(
-            df_dict[r], col_start, fd.loc[r, ("dom", "C")], row_start, row_end)
+            df_dict[r], col_start, total_demand.loc[r, ("dom", "C")], row_start, row_end)
         col_start = fill_reformat_df_columnwise(
-            df_dict[r], col_start, fd.loc[r, ("imp", "C")] + fd.loc[r, ("dom", "C")], row_start, row_end)
+            df_dict[r], col_start, total_demand.loc[r, ("imp", "C")] + total_demand.loc[r, ("dom", "C")], row_start, row_end)
 
         # G
         col_start = fill_reformat_df_columnwise(
-            df_dict[r], col_start, fd.loc[r, ("imp", "G")], row_start, row_end)
+            df_dict[r], col_start, total_demand.loc[r, ("imp", "G")], row_start, row_end)
         col_start = fill_reformat_df_columnwise(
-            df_dict[r], col_start, fd.loc[r, ("dom", "G")], row_start, row_end)
+            df_dict[r], col_start, total_demand.loc[r, ("dom", "G")], row_start, row_end)
         col_start = fill_reformat_df_columnwise(
-            df_dict[r], col_start, fd.loc[r, ("imp", "G")] + fd.loc[r, ("dom", "G")], row_start, row_end)
+            df_dict[r], col_start, total_demand.loc[r, ("imp", "G")] + total_demand.loc[r, ("dom", "G")], row_start, row_end)
 
         # I
         col_start = fill_reformat_df_columnwise(
-            df_dict[r], col_start, fd.loc[r, ("imp", "I")], row_start, row_end)
+            df_dict[r], col_start, total_demand.loc[r, ("imp", "I")], row_start, row_end)
         col_start = fill_reformat_df_columnwise(
-            df_dict[r], col_start, fd.loc[r, ("dom", "I")], row_start, row_end)
+            df_dict[r], col_start, total_demand.loc[r, ("dom", "I")], row_start, row_end)
         col_start = fill_reformat_df_columnwise(
-            df_dict[r], col_start, fd.loc[r, ("imp", "I")] + fd.loc[r, ("dom", "I")], row_start, row_end)
+            df_dict[r], col_start, total_demand.loc[r, ("imp", "I")] + total_demand.loc[r, ("dom", "I")], row_start, row_end)
 
         # X
         col_start = fill_reformat_df_columnwise(

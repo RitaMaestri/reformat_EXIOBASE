@@ -17,6 +17,11 @@ packages = [{include = "reformat_exiobase", from = "src"}]
 pandas = "^2.1.4"
 numpy = "^1.26.4"
 pymrio = "^0.5.4"
+scipy = "^1.15.3"
+
+[tool.poetry.group.dev.dependencies]
+ipykernel = "^6.29.5"
+
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
 build-backend = "poetry.core.masonry.api"
