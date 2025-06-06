@@ -10,7 +10,16 @@ reformat_EXIOBASE: Produces N CSV files—one for each region—containing a res
 
 ## Installation
 
-pip install git+https://github.com/RitaMaestri/reformat_EXIOBASE.git
+>pip install git+https://github.com/RitaMaestri/reformat_EXIOBASE.git
+
+## Installation of a new version
+
+You need to uninstall the old version and reinstall the new.
+
+>pip uninstall reformat-EXIOBASE -y
+
+>pip install git+https://github.com/RitaMaestri/reformat_EXIOBASE.git --no-cache-dir
+
 
 ## Example usage
 An example script is provided in example/run.py.
