@@ -1,0 +1,16 @@
+"SCAF","EXIOBASE_file","EXIOBASE_name","exempt_cons_taxes"
+"C","Y","Final consumption expenditure by households",FALSE
+"C","Y","Final consumption expenditure by non-profit organisations serving households (NPISH)",FALSE
+"G","Y","Final consumption expenditure by government",FALSE
+"I","Y","Gross fixed capital formation",TRUE
+"DS","Y","Changes in inventories",TRUE
+"DS","Y","Changes in valuables",TRUE
+"L","F","Compensation of employees; wages, salaries, & employers' social contributions: Low-skilled",FALSE
+"L","F","Compensation of employees; wages, salaries, & employers' social contributions: Medium-skilled",FALSE
+"L","F","Compensation of employees; wages, salaries, & employers' social contributions: High-skilled",FALSE
+"K","F","Operating surplus: Consumption of fixed capital",FALSE
+"K","F","Operating surplus: Rents on land",FALSE
+"R","F","Operating surplus: Royalties on resources",FALSE
+"R","F","Operating surplus: Remaining net operating surplus",FALSE
+"Consumption_taxes","F","Taxes less subsidies on products purchased: Total",FALSE
+"Production_taxes","F","Other net taxes on production",FALSE

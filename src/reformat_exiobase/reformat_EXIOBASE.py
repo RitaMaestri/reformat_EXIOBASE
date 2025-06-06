@@ -17,7 +17,13 @@ from scipy.optimize import least_squares
 
 
 def EXIOBASE_name(SCAF_name, map_final_demand):
-        return map_final_demand.loc[map_final_demand['SCAF'] == SCAF_name, 'EXIOBASE_name'].values
+    return map_final_demand.loc[map_final_demand['SCAF'] == SCAF_name, 'EXIOBASE_name'].values
+
+def exempt_from_taxes(map_final_demand):
+    return map_final_demand.loc[map_final_demand['exempt_cons_taxes'], 'EXIOBASE_name'].values
+
+def final_demand_agents(map_final_demand):
+    return map_final_demand["SCAF"].loc[map_final_demand["EXIOBASE_file"] == "Y"].unique()
 
 
 def compute_intermediate_domestic_demand(Z):
@@ -55,7 +61,7 @@ def compute_intermediate_imports(Z):
 
 def aggregate_final_demand_agents(Y, map_final_demand):
     # final demand with SCAF categories C,G,I; bilateral trade
-    final_demand_agents_SCAF = map_final_demand["SCAF"].loc[map_final_demand["EXIOBASE_file"] == "Y"].unique()
+    final_demand_agents_SCAF = final_demand_agents(map_final_demand)
 
     regions = Y.columns.get_level_values("region").unique()
 
@@ -187,7 +193,7 @@ def disaggregate_tax(tax_shares,Z,Y, map_final_demand):
 
     taxes_df = pd.DataFrame(0, index=tot_dem.index, columns=tot_dem.columns, dtype=np.float64)
 
-    investment_sector_name = EXIOBASE_name("I", map_final_demand)
+    is_exempt_from_taxes = exempt_from_taxes(map_final_demand)
 
     row_sector_labels = taxes_df.index.get_level_values('sector')
     col_region_labels = taxes_df.columns.get_level_values('region')
@@ -197,7 +203,7 @@ def disaggregate_tax(tax_shares,Z,Y, map_final_demand):
         row_mask = (row_sector_labels == s_ts)
 
         col_mask = (col_region_labels == r_ts) & \
-        (~taxes_df.columns.get_level_values(1).isin(investment_sector_name))
+        (~taxes_df.columns.get_level_values(1).isin(is_exempt_from_taxes))
 
         taxes_df.loc[row_mask, col_mask] = tax_val
 
@@ -386,7 +392,7 @@ def check_unbalance(regional_IOTs_dict, len_sectors):
 ##########################################
 
 
-def reformat_EXIOBASE(aggregation_folder, reformat_folder, sectors_order=[]):
+def reformat_EXIOBASE(aggregation_folder, reformat_folder, sectors_order=[], add_inventories = True):
 
     ###########################
     #### IMPORT DATABASES #####
@@ -398,14 +404,33 @@ def reformat_EXIOBASE(aggregation_folder, reformat_folder, sectors_order=[]):
     Y = pd.read_csv(f"{aggregation_folder}/Y.txt", delimiter="\t",
                     header=[0, 1], index_col=[0, 1])  # final demand
 
-    with pkg_resources.open_text(mappings, "map_reformat_EXIOBASE.csv") as f:
+    
+
+    file_map = {
+        "standard": {
+            "reformat_file": "map_reformat_EXIOBASE.csv",
+            "gtap_file": "map_GTAP_format.xlsx",
+            "gtap_sheet_cost": "Cost structure",
+            "gtap_sheet_cons": "Consumption structure"
+        },
+        "inventories": {
+            "reformat_file": "map_reformat_EXIOBASE_inventories.csv",
+            "gtap_file": "map_GTAP_format.xlsx",  # stesso file Excel
+            "gtap_sheet_cost": "Cost structure",
+            "gtap_sheet_cons": "Cons structure inventories"
+        }
+    }
+
+    key = "inventories" if add_inventories else "standard"
+    config = file_map[key]
+
+    with pkg_resources.open_text(mappings, config["reformat_file"]) as f:
         map_final_demand = pd.read_csv(f)
 
-    with pkg_resources.open_binary(mappings, "map_GTAP_format.xlsx") as f:
-        map_GTAP_cost_structure = pd.read_excel(f, sheet_name='Cost structure', header=None)
+    with pkg_resources.open_binary(mappings, config["gtap_file"]) as f:
+        map_GTAP_cost_structure = pd.read_excel(f, sheet_name=config["gtap_sheet_cost"], header=None)
         f.seek(0)
-        map_GTAP_consumption_structure = pd.read_excel(f, sheet_name='Consumption structure', header=None)
-
+        map_GTAP_consumption_structure = pd.read_excel(f, sheet_name=config["gtap_sheet_cons"], header=None)
 
     ###############################
     #### CHANGE SECTORS ORDER #####
@@ -489,14 +514,13 @@ def reformat_EXIOBASE(aggregation_folder, reformat_folder, sectors_order=[]):
     dom_intermediate_cons_tax = compute_intermediate_domestic_demand(taxes_df[Z.columns]).T
     
     fd_taxes_imp = compute_final_demand_imported(taxes_df[Y.columns], map_final_demand)
-    fd_taxes_dom=compute_final_demand_domestic(taxes_df[Y.columns], map_final_demand)
+    fd_taxes_dom = compute_final_demand_domestic(taxes_df[Y.columns], map_final_demand)
+    
+    cons_taxes = {"imp": {}, "dom": {}}
 
-    imp_C_cons_tax = fd_taxes_imp["C"].to_frame().T
-    dom_C_cons_tax = fd_taxes_dom["C"].to_frame().T
-    imp_G_cons_tax = fd_taxes_imp["G"].to_frame().T
-    dom_G_cons_tax = fd_taxes_dom["G"].to_frame().T
-    imp_I_cons_tax = fd_taxes_imp["I"].to_frame().T
-    dom_I_cons_tax = fd_taxes_dom["I"].to_frame().T
+    for agent in final_demand_agents(map_final_demand):
+        cons_taxes["imp"][agent] = fd_taxes_imp[agent].to_frame().T
+        cons_taxes["dom"][agent] = fd_taxes_dom[agent].to_frame().T
 
 
     ################################
@@ -531,7 +555,16 @@ def reformat_EXIOBASE(aggregation_folder, reformat_folder, sectors_order=[]):
     col_index = pd.MultiIndex.from_frame(expanded_col_indexes.iloc[:, :2], names=[
                                          "Category", "Subcategory"])
 
-    regional_IOT_format = pd.DataFrame(0, index=row_index, columns=col_index, dtype=np.float64)
+
+
+    # Inizializza tutto a NaN
+    arr = np.full((len(row_index) , len(col_index) ), np.nan)
+    
+    # Imposta bande di zeri
+    arr[:len(sectors), :] = 0.0       # prime N righe
+    arr[:, :len(sectors)] = 0.0       # prime N colonne
+
+    regional_IOT_format = pd.DataFrame(arr, index=row_index, columns=col_index, dtype=np.float64)
 
     ############################################
     ##### fill in the reformatted database #####
@@ -604,25 +637,25 @@ def reformat_EXIOBASE(aggregation_folder, reformat_folder, sectors_order=[]):
             [imp_intermediate_cons_tax.loc[r], dom_intermediate_cons_tax.loc[r]]).sum(axis=0), col_start, col_end)
 
         row_start = fill_reformat_df_row_wise(
-            df_dict[r], row_start, imp_I_cons_tax[r], col_start, col_end)
+            df_dict[r], row_start, cons_taxes["imp"]["I"][r], col_start, col_end)
         row_start = fill_reformat_df_row_wise(
-            df_dict[r], row_start, dom_I_cons_tax[r], col_start, col_end)
+            df_dict[r], row_start, cons_taxes["dom"]["I"][r], col_start, col_end)
         row_start = fill_reformat_df_row_wise(df_dict[r], row_start, pd.concat(
-            [imp_I_cons_tax[r], dom_I_cons_tax[r]]).sum(axis=0), col_start, col_end)
+            [cons_taxes["imp"]["I"][r], cons_taxes["dom"]["I"][r]]).sum(axis=0), col_start, col_end)
 
         row_start = fill_reformat_df_row_wise(
-            df_dict[r], row_start, imp_C_cons_tax[r], col_start, col_end)
+            df_dict[r], row_start, cons_taxes["imp"]["C"][r], col_start, col_end)
         row_start = fill_reformat_df_row_wise(
-            df_dict[r], row_start, dom_C_cons_tax[r], col_start, col_end)
+            df_dict[r], row_start, cons_taxes["dom"]["C"][r], col_start, col_end)
         row_start = fill_reformat_df_row_wise(df_dict[r], row_start, pd.concat(
-            [imp_C_cons_tax[r], dom_C_cons_tax[r]]).sum(axis=0), col_start, col_end)
+            [cons_taxes["imp"]["C"][r], cons_taxes["dom"]["C"][r]]).sum(axis=0), col_start, col_end)
 
         row_start = fill_reformat_df_row_wise(
-            df_dict[r], row_start, imp_G_cons_tax[r], col_start, col_end)
+            df_dict[r], row_start, cons_taxes["imp"]["G"][r], col_start, col_end)
         row_start = fill_reformat_df_row_wise(
-            df_dict[r], row_start, dom_G_cons_tax[r], col_start, col_end)
+            df_dict[r], row_start, cons_taxes["dom"]["G"][r], col_start, col_end)
         row_start = fill_reformat_df_row_wise(df_dict[r], row_start, pd.concat(
-            [imp_G_cons_tax[r], dom_G_cons_tax[r]]).sum(axis=0), col_start, col_end)
+            [cons_taxes["imp"]["G"][r], cons_taxes["dom"]["G"][r]]).sum(axis=0), col_start, col_end)
 
         row_start += 4
 
@@ -671,6 +704,14 @@ def reformat_EXIOBASE(aggregation_folder, reformat_folder, sectors_order=[]):
             df_dict[r], col_start, total_demand.loc[r, ("dom", "I")], row_start, row_end)
         col_start = fill_reformat_df_columnwise(
             df_dict[r], col_start, total_demand.loc[r, ("imp", "I")] + total_demand.loc[r, ("dom", "I")], row_start, row_end)
+        #DS
+        if add_inventories:
+            col_start = fill_reformat_df_columnwise(
+                df_dict[r], col_start, total_demand.loc[r, ("imp", "DS")], row_start, row_end)
+            col_start = fill_reformat_df_columnwise(
+                df_dict[r], col_start, total_demand.loc[r, ("dom", "DS")], row_start, row_end)
+            col_start = fill_reformat_df_columnwise(
+                df_dict[r], col_start, total_demand.loc[r, ("imp", "DS")] + total_demand.loc[r, ("dom", "DS")], row_start, row_end)
 
         # X
         col_start = fill_reformat_df_columnwise(
@@ -696,9 +737,19 @@ def reformat_EXIOBASE(aggregation_folder, reformat_folder, sectors_order=[]):
     ####################
 
     for r in regions:
-        df_dict[r].index.names = [None] * df_dict[r].index.nlevels
-        df_dict[r].columns.names = [None] * df_dict[r].columns.nlevels
-        df_dict[r].to_csv(
-            reformat_folder + "/" + r + ".csv")
+        df = df_dict[r].copy()
+
+        # Rimuovi i nomi dei livelli (non i valori) se necessario
+        df.index.names = [None] * df.index.nlevels
+
+        # Pulizia del MultiIndex delle colonne: sostituisci i NaN con stringhe vuote
+        if isinstance(df.columns, pd.MultiIndex):
+            col_df = df.columns.to_frame(index=False).fillna('')
+            df.columns = pd.MultiIndex.from_frame(col_df)
+        else:
+            df.columns = df.columns.to_series().fillna('')
+
+        # Salva con na_rep='' per valori (dati)
+        df.to_csv(reformat_folder + "/" + r + ".csv", na_rep='')
 
     print("Reformatted tables available at " + reformat_folder)

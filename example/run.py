@@ -15,7 +15,8 @@ aggregation_path = output_path / "aggregation"
 reformat_path = output_path / "reformat"
 
 #create paths if not present
-for folder in [ output_path, download_path, aggregation_path, reformat_path]:
+for folder in [ output_path, 
+download_path, aggregation_path, reformat_path]:
     folder.mkdir(parents=True, exist_ok=True)
 
 # mappings path
@@ -36,4 +37,4 @@ secotrs_order= ["AGRICULTURE","MANUFACTURE","SERVICES","STEEL","CHEMICAL","ENERG
 
 #aggregate_EXIOBASE(reg_map_path=str(reg_map_file), sec_map_path=str(sec_map_file), output_path=str(aggregation_path), input_path=str(download_path), year=year, system=p_or_i)
 
-reformat_EXIOBASE(aggregation_folder=str(aggregation_path), reformat_folder=str(reformat_path), sectors_order=secotrs_order)
+reformat_EXIOBASE(aggregation_folder=str(aggregation_path), reformat_folder=str(reformat_path), sectors_order=secotrs_order, add_inventories = True)
