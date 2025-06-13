@@ -658,8 +658,16 @@ def reformat_EXIOBASE(aggregation_folder, reformat_folder, sectors_order=[], add
             [cons_taxes["imp"]["G"][r], cons_taxes["dom"]["G"][r]]).sum(axis=0), col_start, col_end)
 
         row_start += 4
+        #total TLSP
+        row_start = fill_reformat_df_row_wise(df_dict[r], row_start, pd.concat(
+            [imp_intermediate_cons_tax.loc[r], dom_intermediate_cons_tax.loc[r],
+            cons_taxes["imp"]["G"][r], cons_taxes["dom"]["G"][r],
+            cons_taxes["imp"]["C"][r], cons_taxes["dom"]["C"][r],
+            cons_taxes["imp"]["I"][r], cons_taxes["dom"]["I"][r]]
+            ).sum(axis=0), col_start, col_end)
 
         # sum
+
         sum_rows = df_dict[r].xs('∑', level='Subcategory').sum()[:col_end]
         fill_reformat_df_row_wise(
             df_dict[r], row_start, sum_rows, col_start, col_end)
@@ -750,6 +758,6 @@ def reformat_EXIOBASE(aggregation_folder, reformat_folder, sectors_order=[], add
             df.columns = df.columns.to_series().fillna('')
 
         # Salva con na_rep='' per valori (dati)
-        df.to_csv(reformat_folder + "/" + r + ".csv", na_rep='')
+        df.to_csv(reformat_folder + "/" + r + ".csv", na_rep='', encoding='utf-8-sig')
 
     print("Reformatted tables available at " + reformat_folder)
