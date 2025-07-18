@@ -604,9 +604,8 @@ def reformat_EXIOBASE(aggregation_folder, reformat_folder, sectors_order=[], add
             df_dict[r], row_start, L[r], col_start, col_end)
         row_start += 4
         row_start = fill_reformat_df_row_wise(
-            df_dict[r], row_start, K[r], col_start, col_end)
-        row_start = fill_reformat_df_row_wise(
-            df_dict[r], row_start, R[r], col_start, col_end)
+            df_dict[r], row_start, pd.concat([K, R]).sum(axis=0)[r], col_start, col_end)
+        row_start += 1
         row_start = fill_reformat_df_row_wise(
             df_dict[r], row_start, pd.concat([L, K, R]).sum(axis=0)[r], col_start, col_end)
 
