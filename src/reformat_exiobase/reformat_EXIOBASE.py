@@ -9,6 +9,7 @@ import numpy as np
 from . import mappings
 import importlib.resources as pkg_resources
 from scipy.optimize import least_squares
+from typing import List
 
 
 ########################################
@@ -24,6 +25,49 @@ def exempt_from_taxes(map_final_demand):
 
 def final_demand_agents(map_final_demand):
     return map_final_demand["SCAF"].loc[map_final_demand["EXIOBASE_file"] == "Y"].unique()
+
+
+def reallocate_G_energy_to_C(Y, energy_sectors):
+    """
+    For each column region in Y, move 'Final consumption expenditure by government'
+    for the given energy sectors into 'Final consumption expenditure by households',
+    then set the government cells to zero.
+
+    Parameters
+    ----------
+    Y : pd.DataFrame
+        EXIOBASE final demand matrix with a MultiIndex on rows (region, sector)
+        and MultiIndex columns (region, category).
+    energy_sectors : list of str
+        List of sector names (e.g. ["ENERGY"]) to apply the reallocation to.
+
+    Returns
+    -------
+    pd.DataFrame
+        Modified copy of Y.
+    """
+    Y = Y.copy()
+
+    # Loop over each region in the columns (first level of MultiIndex)
+    for col_region in Y.columns.get_level_values('region').unique():
+        households_col = (col_region, 'Final consumption expenditure by households')
+        gov_col = (col_region, 'Final consumption expenditure by government')
+
+        # Mask rows where sector is in the target energy sectors
+        row_mask = Y.index.get_level_values('sector').isin(energy_sectors)
+
+        # Add government expenditure to households expenditure
+        Y.loc[row_mask, households_col] += Y.loc[row_mask, gov_col]
+
+        # Set the original government expenditure cells to zero
+        Y.loc[row_mask, gov_col] = 0
+
+    return Y
+
+
+
+
+
 
 
 def compute_intermediate_domestic_demand(Z):
@@ -151,7 +195,35 @@ def compute_final_demand_imported(Y, map_final_demand):
 
     return fd_imp
 
+def set_to_zero_gvt_energy(df: pd.DataFrame, energy_sectors: List[str]) -> pd.DataFrame:
+    """
+    For every region in the MultiIndex DataFrame, for each given sector,
+    take the value from column 'G', add it to column 'C',
+    and set the original 'G' value to zero.
 
+    Parameters
+    ----------
+    df : pd.DataFrame
+        MultiIndex DataFrame with index levels [region, sector]
+        and columns including 'C' and 'G'.
+    sectors : list of str
+        List of sector names for which the operation is performed.
+
+    Returns
+    -------
+    pd.DataFrame
+        Modified DataFrame.
+    """
+    df = df.copy()
+
+    for region in df.index.get_level_values(0).unique():
+        for sector in energy_sectors:
+            if (region, sector) in df.index:
+                g_val = df.loc[(region, sector), 'G']
+                df.loc[(region, sector), 'C'] += g_val
+                df.loc[(region, sector), 'G'] = 0
+
+    return df
 
 def concatenate_total_demand(fd_dom, fd_imp, intermediate_dom, intermediate_imp):
 
@@ -185,34 +257,34 @@ def concatenate_total_demand(fd_dom, fd_imp, intermediate_dom, intermediate_imp)
 
 
 
-def disaggregate_tax(tax_shares,Z,Y, map_final_demand):
+def disaggregate_tax(tax_rates,Z,Y, map_final_demand):
 
     tot_dem = pd.concat([Z, Y], axis=1)
     tot_dem.columns = tot_dem.columns.set_names('category', level=1)
 
 
-    taxes_df = pd.DataFrame(0, index=tot_dem.index, columns=tot_dem.columns, dtype=np.float64)
+    tax_rates_df = pd.DataFrame(0, index=tot_dem.index, columns=tot_dem.columns, dtype=np.float64)
 
     is_exempt_from_taxes = exempt_from_taxes(map_final_demand)
 
-    row_sector_labels = taxes_df.index.get_level_values('sector')
-    col_region_labels = taxes_df.columns.get_level_values('region')
+    row_sector_labels = tax_rates_df.index.get_level_values('sector')
+    col_region_labels = tax_rates_df.columns.get_level_values('region')
 
-    for (r_ts, s_ts), tax_val in tax_shares.items():
+    for (r_ts, s_ts), tax_val in tax_rates.items():
 
         row_mask = (row_sector_labels == s_ts)
 
         col_mask = (col_region_labels == r_ts) & \
-        (~taxes_df.columns.get_level_values(1).isin(is_exempt_from_taxes))
+        (~tax_rates_df.columns.get_level_values(1).isin(is_exempt_from_taxes))
 
-        taxes_df.loc[row_mask, col_mask] = tax_val
+        tax_rates_df.loc[row_mask, col_mask] = tax_val
 
-    tax_df = taxes_df * tot_dem
+    tax_df = tax_rates_df * tot_dem
 
     return tax_df
 
 
-def adjust_tax_shares(Z: pd.DataFrame, Y: pd.DataFrame, F: pd.DataFrame, map_final_demand) -> pd.Series:
+def adjust_tax_rates(Z: pd.DataFrame, Y: pd.DataFrame, F: pd.DataFrame, map_final_demand) -> pd.Series:
 
     #the taxes on consumption in the file F.txt for region R and sector S include 
     #taxes that are paid abroad for the consumption of the good S produced in R.
@@ -222,8 +294,8 @@ def adjust_tax_shares(Z: pd.DataFrame, Y: pd.DataFrame, F: pd.DataFrame, map_fin
     # the resulting national account is balanced
 
     def reallocate_tax(tax_values, tax_index, Z, Y, F, map_final_demand):
-        tax_shares = pd.Series(tax_values, index=tax_index)
-        tax_df = disaggregate_tax(tax_shares, Z, Y,map_final_demand)
+        tax_rates = pd.Series(tax_values, index=tax_index)
+        tax_df = disaggregate_tax(tax_rates, Z, Y, map_final_demand)
         computed_TLSP = tax_df.sum(axis=1)
         discrepancy = F.loc[EXIOBASE_name("Consumption_taxes", map_final_demand)] - computed_TLSP
         return discrepancy.values[0]
@@ -392,7 +464,7 @@ def check_unbalance(regional_IOTs_dict, len_sectors):
 ##########################################
 
 
-def reformat_EXIOBASE(aggregation_folder, reformat_folder, sectors_order=[], add_inventories = True):
+def reformat_EXIOBASE(aggregation_folder, reformat_folder, energy_sectors, sectors_order=[], add_inventories = True):
 
     ###########################
     #### IMPORT DATABASES #####
@@ -471,7 +543,7 @@ def reformat_EXIOBASE(aggregation_folder, reformat_folder, sectors_order=[], add
     Y = reorder_io_rows(Y, sectors)
     Z = reorder_io_matrix(Z, sectors)
 
-
+    Y= reallocate_G_energy_to_C(Y, energy_sectors)
     
     #####################################
     ### INTERMEDIATE AND FINAL DEMAND ###
@@ -481,7 +553,7 @@ def reformat_EXIOBASE(aggregation_folder, reformat_folder, sectors_order=[], add
 
     intermediate_imp = compute_intermediate_imports(Z)
 
-    fd_dom=compute_final_demand_domestic(Y, map_final_demand)
+    fd_dom = compute_final_demand_domestic(Y, map_final_demand)
 
     fd_imp = compute_final_demand_imported(Y, map_final_demand)
 
@@ -491,12 +563,12 @@ def reformat_EXIOBASE(aggregation_folder, reformat_folder, sectors_order=[], add
     ##### REALLOCATION OF TAXES ON CONSUMPTION ########
     ###################################################
 
-   
-    tax_shares = adjust_tax_shares(Z, Y, F, map_final_demand)
+   #there is a unique tax rate paid by all consumers per product purchased per region
+    tax_rates = adjust_tax_rates(Z, Y, F, map_final_demand)
 
-    taxes_df = disaggregate_tax(tax_shares, Z, Y, map_final_demand)
+    tax_rates_df = disaggregate_tax(tax_rates, Z, Y, map_final_demand)
 
-    net_flows = pd.concat([Z, Y], axis=1) - taxes_df
+    net_flows = pd.concat([Z, Y], axis=1) - tax_rates_df
 
     ############################################
     ##### IMPORT AND EXPORT NET OF TAXES #######
@@ -510,11 +582,11 @@ def reformat_EXIOBASE(aggregation_folder, reformat_folder, sectors_order=[], add
     ##### ALLOCATE CONSUMPTION TAXES TO CONSUMERS ####
     ##################################################
     
-    imp_intermediate_cons_tax = compute_intermediate_imports(taxes_df[Z.columns]).T
-    dom_intermediate_cons_tax = compute_intermediate_domestic_demand(taxes_df[Z.columns]).T
+    imp_intermediate_cons_tax = compute_intermediate_imports(tax_rates_df[Z.columns]).T
+    dom_intermediate_cons_tax = compute_intermediate_domestic_demand(tax_rates_df[Z.columns]).T
     
-    fd_taxes_imp = compute_final_demand_imported(taxes_df[Y.columns], map_final_demand)
-    fd_taxes_dom = compute_final_demand_domestic(taxes_df[Y.columns], map_final_demand)
+    fd_taxes_imp = compute_final_demand_imported(tax_rates_df[Y.columns], map_final_demand)
+    fd_taxes_dom = compute_final_demand_domestic(tax_rates_df[Y.columns], map_final_demand)
     
     cons_taxes = {"imp": {}, "dom": {}}
 
