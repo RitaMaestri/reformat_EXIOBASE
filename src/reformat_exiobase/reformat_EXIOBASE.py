@@ -27,11 +27,12 @@ def final_demand_agents(map_final_demand):
     return map_final_demand["SCAF"].loc[map_final_demand["EXIOBASE_file"] == "Y"].unique()
 
 
-def reallocate_G_energy_to_C(Y, energy_sectors):
+def reallocate_G_I_energy_to_C(Y, energy_sectors):
     """
-    For each column region in Y, move 'Final consumption expenditure by government'
+    For each column region in Y, move 'Final consumption expenditure by government',
+    'Gross fixed capital formation', 'Changes in inventories', and 'Changes in valuables'
     for the given energy sectors into 'Final consumption expenditure by households',
-    then set the government cells to zero.
+    then set those cells to zero.
 
     Parameters
     ----------
@@ -48,19 +49,22 @@ def reallocate_G_energy_to_C(Y, energy_sectors):
     """
     Y = Y.copy()
 
-    # Loop over each region in the columns (first level of MultiIndex)
+    cols_to_reallocate = [
+        'Final consumption expenditure by government',
+        'Gross fixed capital formation',
+        'Changes in inventories',
+        'Changes in valuables',
+    ]
+
+    row_mask = Y.index.get_level_values('sector').isin(energy_sectors)
+
     for col_region in Y.columns.get_level_values('region').unique():
         households_col = (col_region, 'Final consumption expenditure by households')
-        gov_col = (col_region, 'Final consumption expenditure by government')
 
-        # Mask rows where sector is in the target energy sectors
-        row_mask = Y.index.get_level_values('sector').isin(energy_sectors)
-
-        # Add government expenditure to households expenditure
-        Y.loc[row_mask, households_col] += Y.loc[row_mask, gov_col]
-
-        # Set the original government expenditure cells to zero
-        Y.loc[row_mask, gov_col] = 0
+        for cat in cols_to_reallocate:
+            col = (col_region, cat)
+            Y.loc[row_mask, households_col] += Y.loc[row_mask, col]
+            Y.loc[row_mask, col] = 0
 
     return Y
 
@@ -543,7 +547,7 @@ def reformat_EXIOBASE(aggregation_folder, reformat_folder, energy_sectors, secto
     Y = reorder_io_rows(Y, sectors)
     Z = reorder_io_matrix(Z, sectors)
 
-    Y= reallocate_G_energy_to_C(Y, energy_sectors)
+    Y= reallocate_G_I_energy_to_C(Y, energy_sectors)
     
     #####################################
     ### INTERMEDIATE AND FINAL DEMAND ###
