@@ -468,7 +468,7 @@ def check_unbalance(regional_IOTs_dict, len_sectors):
 ##########################################
 
 
-def reformat_EXIOBASE(aggregation_folder, reformat_folder, energy_sectors, sectors_order=[], add_inventories = True):
+def reformat_EXIOBASE(aggregation_folder, reformat_folder, energy_sectors=None, sectors_order=[], add_inventories = True):
 
     ###########################
     #### IMPORT DATABASES #####
@@ -547,7 +547,8 @@ def reformat_EXIOBASE(aggregation_folder, reformat_folder, energy_sectors, secto
     Y = reorder_io_rows(Y, sectors)
     Z = reorder_io_matrix(Z, sectors)
 
-    Y= reallocate_G_I_energy_to_C(Y, energy_sectors)
+    if energy_sectors is not None:
+        Y = reallocate_G_I_energy_to_C(Y, energy_sectors)
     
     #####################################
     ### INTERMEDIATE AND FINAL DEMAND ###
