@@ -26,15 +26,15 @@ reg_map_file = current_path / "map_regions.csv"
 #download configuration
 year = "2020"
 #product_per_product or industry_per_industry
-p_or_i = "pxp"
+p_or_i = "ixi"
 
 version = "10.5281/zenodo.3583070" # version released in february 2025
 
-secotrs_order= ["AGRICULTURE","MANUFACTURE","SERVICES","STEEL","CHEMICAL","ENERGY","TRANSPORTATION"]
+#secotrs_order= ["AGRICULTURE","MANUFACTURE","SERVICES","STEEL","CHEMICAL","ENERGY","TRANSPORTATION"]
 
 
-#download_EXIOBASE(str(download_path))
+#download_EXIOBASE(str(download_path), system=p_or_i, years=[year], version=version, overwrite_existing=True)
 
-#aggregate_EXIOBASE(reg_map_path=str(reg_map_file), sec_map_path=str(sec_map_file), output_path=str(aggregation_path), input_path=str(download_path), year=year, system=p_or_i)
+aggregate_EXIOBASE(reg_map_path=str(reg_map_file), sec_map_path=str(sec_map_file), output_path=str(aggregation_path), input_path=str(download_path), year=year, system=p_or_i)
 
-reformat_EXIOBASE(aggregation_folder=str(aggregation_path), reformat_folder=str(reformat_path), energy_sectors=["ENERGY"], sectors_order=secotrs_order, add_inventories = True)
+reformat_EXIOBASE(aggregation_folder=str(aggregation_path), reformat_folder=str(reformat_path))
