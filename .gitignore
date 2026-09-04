@@ -1,3 +1,4 @@
 example/output/*
 *.pyc
 environment.yaml
+example/data/*
