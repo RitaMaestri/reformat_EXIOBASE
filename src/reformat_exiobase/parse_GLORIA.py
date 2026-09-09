@@ -20,6 +20,78 @@ from pymrio.tools.ioparser import IDX_NAMES, MRIOMetaData
 _construct_IO = getattr(_ioparser, "__construct_IO")
 
 
+def _first_match(directory, suffix):
+    """Glob one file, raising a clear error instead of an IndexError on no match."""
+    matches = glob.glob(os.path.join(directory, "*" + suffix))
+    if not matches:
+        raise FileNotFoundError(f"No file matching *{suffix} found in {directory}")
+    return matches[0]
+
+
+def compute_net_production_taxes(va):
+    """Net taxes on production (region x sector), from GLORIA's own VA rows.
+
+    Subsidies on production D.39 are already stored as negative values in GLORIA's
+    raw data (verified against the source CSV), so netting against Taxes on
+    production D.29 is addition, not subtraction.
+    """
+    return va.loc["Taxes on production D.29"] + va.loc["Subsidies on production D.39"]
+
+
+def compute_net_sales_taxes(mrio_path, year, version, is_industry, product_index, chunksize):
+    """Net taxes less subsidies on products purchased (region x sector, product/seller basis).
+
+    GLORIA has no ready-made row for this (unlike production taxes). It's derived from
+    the tax/subsidy markup matrices: Markup004 = taxes on products, Markup005 =
+    subsidies on products, each published separately for the T (intermediate
+    transactions) and Y (final demand) matrices. Y's buyer side (final-demand
+    categories) has no sector dimension, so the only basis addable across both T and Y
+    is the product/seller sector: for each Product row, sum across every buyer column.
+
+    Subsidies (Markup005) are already stored as negative values in the raw files
+    (verified against the source CSVs), so netting against taxes (Markup004) is
+    addition, not subtraction.
+    """
+    t004_path = _first_match(
+        os.path.join(mrio_path, "Taxes on product"),
+        f"_120secMother_AllCountries_002_T-Results_{str(year)}_0{str(version)}_Markup004(full).csv",
+    )
+    t005_path = _first_match(
+        os.path.join(mrio_path, "Subsidies on Products"),
+        f"_120secMother_AllCountries_002_T-Results_{str(year)}_0{str(version)}_Markup005(full).csv",
+    )
+    y004_path = _first_match(
+        os.path.join(mrio_path, "Taxes on product"),
+        f"_120secMother_AllCountries_002_Y-Results_{str(year)}_0{str(version)}_Markup004(full).csv",
+    )
+    y005_path = _first_match(
+        os.path.join(mrio_path, "Subsidies on Products"),
+        f"_120secMother_AllCountries_002_Y-Results_{str(year)}_0{str(version)}_Markup005(full).csv",
+    )
+
+    n_product_rows = int((~is_industry).sum())
+
+    def stream_product_row_sums(csv_path):
+        totals = np.zeros(n_product_rows, dtype=np.float64)
+        cursor = 0
+        p_row = 0
+        for chunk in pd.read_csv(csv_path, header=None, chunksize=chunksize, dtype=np.float64):
+            n = chunk.shape[0]
+            chunk_is_industry = is_industry[cursor : cursor + n]
+            row_sums = chunk.to_numpy()[~chunk_is_industry].sum(axis=1)
+            totals[p_row : p_row + row_sums.shape[0]] = row_sums
+            p_row += row_sums.shape[0]
+            cursor += n
+        return totals
+
+    t004_sums = stream_product_row_sums(t004_path)
+    t005_sums = stream_product_row_sums(t005_path)
+    y004_sums = pd.read_csv(y004_path, header=None, dtype=np.float64).to_numpy()[~is_industry].sum(axis=1)
+    y005_sums = pd.read_csv(y005_path, header=None, dtype=np.float64).to_numpy()[~is_industry].sum(axis=1)
+
+    return pd.Series(t004_sums + t005_sums + y004_sums + y005_sums, index=product_index)
+
+
 def parse_gloria_lowmem(path, year, version=59, price="bp", country_names="gloria", construct="B", chunksize=1000):
     """Parse the GLORIA database without ever loading the full T matrix into memory.
 
@@ -154,6 +226,10 @@ def parse_gloria_lowmem(path, year, version=59, price="bp", country_names="glori
     data["V"] = pd.DataFrame(V_arr, index=industry_index, columns=product_index)
     data["U"] = pd.DataFrame(U_arr, index=product_index, columns=industry_index)
 
+    print("Streaming tax/subsidy-on-products matrices for net sales tax...")
+    net_sales_tax = compute_net_sales_taxes(mrio_path, year, version, is_industry, product_index, chunksize)
+    data["net_sales_tax_by_product"] = net_sales_tax.to_frame(name="value")
+
     print("Checking for empty countries...")
     row_sum = data["V"].groupby(level="region").sum().sum(axis=1).add(
         data["U"].groupby(level="region").sum().sum(axis=1), fill_value=0
@@ -163,7 +239,7 @@ def parse_gloria_lowmem(path, year, version=59, price="bp", country_names="glori
     )
     empty_countries = row_sum[(row_sum == 0) & (column_sum == 0)].index.to_list()
 
-    for key in ("V", "U", "Y", "VA", "Q", "QY"):
+    for key in ("V", "U", "Y", "VA", "Q", "QY", "net_sales_tax_by_product"):
         if "region" in data[key].columns.names:
             if empty_countries:
                 meta_rec._add_modify(f"Remove empty countries ({empty_countries}) columns from {key}")
@@ -178,6 +254,8 @@ def parse_gloria_lowmem(path, year, version=59, price="bp", country_names="glori
     else:
         print("  None found.")
 
+    net_sales_tax = data.pop("net_sales_tax_by_product")["value"]
+
     # Remove 0s in value added, final demand and satellites (redundant Industry/Product level)
     data["VA"] = data["VA"].loc[:, data["VA"].columns.get_level_values(1) == "Industry"]
     data["VA"].columns = data["VA"].columns.droplevel(1)
@@ -190,6 +268,9 @@ def parse_gloria_lowmem(path, year, version=59, price="bp", country_names="glori
     # other pymrio extension, so pymrio's own aggregate() aggregates it correctly.
     data["VA"] = data["VA"].groupby(data["VA"].index.get_level_values("inputtype")).sum()
     data["VA"].index.name = "inputtype"
+
+    data["VA"].loc["Other net taxes on production"] = compute_net_production_taxes(data["VA"])
+    data["VA"].loc["Taxes less subsidies on products purchased: Total"] = net_sales_tax
 
     data["Y"] = data["Y"].loc[data["Y"].index.get_level_values(1) == "Product", :]
     data["Y"].index = data["Y"].index.droplevel(1)
