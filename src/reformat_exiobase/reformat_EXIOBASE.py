@@ -4,6 +4,7 @@ Created on Thu Mar 13 14:20:45 2025
 @author: rita
 """
 
+import json
 import pandas as pd
 import numpy as np
 from . import mappings
@@ -473,32 +474,19 @@ def reformat_EXIOBASE(aggregation_folder, reformat_folder, energy_sectors=None, 
     ###########################
     #### IMPORT DATABASES #####
     ###########################
-    F = pd.read_csv(f"{aggregation_folder}/factor_inputs/F.txt", delimiter="\t",
+    with pkg_resources.open_text(mappings, "config_EXIOBASE.json") as f:
+        exio_config = json.load(f)
+
+    input_files = exio_config["input_files"]
+    F = pd.read_csv(f"{aggregation_folder}/{input_files['factor_inputs_subfolder']}/{input_files['F']}", delimiter="\t",
                     header=[0, 1], index_col=0)  # Factors of productions/stressors/impacts
-    Z = pd.read_csv(f"{aggregation_folder}/Z.txt", delimiter="\t",
+    Z = pd.read_csv(f"{aggregation_folder}/{input_files['Z']}", delimiter="\t",
                     header=[0, 1], index_col=[0, 1])  # flow/transactions matrix
-    Y = pd.read_csv(f"{aggregation_folder}/Y.txt", delimiter="\t",
+    Y = pd.read_csv(f"{aggregation_folder}/{input_files['Y']}", delimiter="\t",
                     header=[0, 1], index_col=[0, 1])  # final demand
 
-    
-
-    file_map = {
-        "standard": {
-            "reformat_file": "map_reformat_EXIOBASE.csv",
-            "gtap_file": "map_GTAP_format.xlsx",
-            "gtap_sheet_cost": "Cost structure",
-            "gtap_sheet_cons": "Consumption structure"
-        },
-        "inventories": {
-            "reformat_file": "map_reformat_EXIOBASE_inventories.csv",
-            "gtap_file": "map_GTAP_format.xlsx",  # stesso file Excel
-            "gtap_sheet_cost": "Cost structure",
-            "gtap_sheet_cons": "Cons structure inventories"
-        }
-    }
-
     key = "inventories" if add_inventories else "standard"
-    config = file_map[key]
+    config = exio_config["mapping_files"][key]
 
     with pkg_resources.open_text(mappings, config["reformat_file"]) as f:
         map_final_demand = pd.read_csv(f)
