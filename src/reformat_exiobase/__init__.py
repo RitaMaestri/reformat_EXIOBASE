@@ -7,5 +7,7 @@ Created on Tue Mar 18 19:18:50 2025
 """
 
 from .download_EXIOBASE import download_EXIOBASE
-from .reformat_EXIOBASE import reformat_EXIOBASE
+from .reformat_EXIOBASE import reformat_EXIOBASE, reformat_GLORIA
 from .aggregate_EXIOBASE import aggregate_EXIOBASE
+from .parse_GLORIA import parse_gloria_lowmem
+from .aggregate_GLORIA import aggregate_GLORIA

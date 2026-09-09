@@ -20,8 +20,9 @@ download_path, aggregation_path, reformat_path]:
     folder.mkdir(parents=True, exist_ok=True)
 
 # mappings path
-sec_map_file = current_path / "map_sectors.csv"
-reg_map_file = current_path / "map_regions.csv"
+mappings_path = current_path / "mappings"
+sec_map_file = mappings_path / "map_sectors.csv"
+reg_map_file = mappings_path / "map_regions.csv"
 
 #download configuration
 year = "2020"

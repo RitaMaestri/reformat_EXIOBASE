@@ -1,0 +1,165 @@
+GLORIA region,Region_name,SCAF region
+XAM,Rest of Americas,ROW
+XEU,Rest of Europe,ROW
+XAF,Rest of Africa,ROW
+XAS,Rest of Asia-Pacific,ROW
+AFG,Afghanistan,ROW
+AGO,Angola,ROW
+ALB,Albania,ROW
+ARE,United Arab Emirates,ROW
+ARG,Argentina,ROW
+ARM,Armenia,ROW
+AUS,Australia,ROW
+AUT,Austria,EUR
+AZE,Azerbaijan,ROW
+BDI,Burundi,ROW
+BEL,Belgium,EUR
+BEN,Benin,ROW
+BFA,Burkina Faso,ROW
+BGD,Bangladesh,ROW
+BGR,Bulgaria,EUR
+BHR,Bahrain,ROW
+BHS,Bahamas,ROW
+BIH,Bosnia and Herzegovina,ROW
+BLR,Belarus,ROW
+BLZ,Belize,ROW
+BOL,Bolivia,ROW
+BRA,Brazil,ROW
+BRN,Brunei Darussalam,ROW
+BTN,Bhutan,ROW
+BWA,Botswana,ROW
+CAF,Central African Republic,ROW
+CAN,Canada,ROW
+CHE,Switzerland,ROW
+CHL,Chile,ROW
+CHN,China,CHN
+CIV,Cote d'Ivoire,ROW
+CMR,Cameroon,ROW
+COD,DR Congo,ROW
+COG,Rep Congo,ROW
+COL,Colombia,ROW
+CRI,Costa Rica,ROW
+CUB,Cuba,ROW
+CYP,Cyprus,EUR
+CZE,CSSR/Czech Republic (1990/1991),EUR
+DEU,Germany,EUR
+DJI,Djibouti,ROW
+DYE,DR Yemen (Aden),ROW
+DNK,Denmark,EUR
+DOM,Dominican Republic,ROW
+DZA,Algeria,ROW
+ECU,Ecuador,ROW
+EGY,Egypt,ROW
+ERI,Eritrea,ROW
+ESP,Spain,EUR
+EST,Estonia,EUR
+ETH,Ethiopia/DR Ethiopia (1992/1993),ROW
+FIN,Finland,EUR
+FRA,France,EUR
+GAB,Gabon,ROW
+GBR,United Kingdom,EUR
+GEO,Georgia,ROW
+GHA,Ghana,ROW
+GIN,Guinea,ROW
+GMB,Gambia,ROW
+GNQ,Equatorial Guinea,ROW
+GRC,Greece,EUR
+GTM,Guatemala,ROW
+HND,Honduras,ROW
+HKG,Hong Kong,ROW
+HRV,Croatia,EUR
+HTI,Haiti,ROW
+HUN,Hungary,EUR
+IDN,Indonesia,ROW
+IND,India,ROW
+IRL,Ireland,EUR
+IRN,Iran,ROW
+IRQ,Iraq,ROW
+ISL,Iceland,ROW
+ISR,Israel,ROW
+ITA,Italy,EUR
+JAM,Jamaica,ROW
+JOR,Jordan,ROW
+JPN,Japan,ROW
+KAZ,Kazakhstan,ROW
+KEN,Kenya,ROW
+KGZ,Kyrgyzstan,ROW
+KHM,Cambodia,ROW
+KOR,South Korea,ROW
+KWT,Kuwait,ROW
+LAO,Laos,ROW
+LBN,Lebanon,ROW
+LBR,Liberia,ROW
+LBY,Libya,ROW
+LKA,Sri Lanka,ROW
+LTU,Lithuania,EUR
+LUX,Luxembourg,EUR
+LVA,Latvia,EUR
+MAR,Morocco,ROW
+MDA,Moldova,ROW
+MDG,Madagascar,ROW
+MEX,Mexico,ROW
+MKD,Macedonia,ROW
+MLI,Mali,ROW
+MLT,Malta,EUR
+MMR,Myanmar,ROW
+MNG,Mongolia,ROW
+MOZ,Mozambique,ROW
+MRT,Mauritania,ROW
+MWI,Malawi,ROW
+MYS,Malaysia,ROW
+NAM,Namibia,ROW
+NER,Niger,ROW
+NGA,Nigeria,ROW
+NIC,Nicaragua,ROW
+NLD,Netherlands,EUR
+NOR,Norway,ROW
+NPL,Nepal,ROW
+NZL,New Zealand,ROW
+OMN,Oman,ROW
+PAK,Pakistan,ROW
+PSE,Palestine,ROW
+PAN,Panama,ROW
+PER,Peru,ROW
+PHL,Philippines,ROW
+PNG,Papua New Guinea,ROW
+POL,Poland,EUR
+PRK,North Korea,ROW
+PRT,Portugal,EUR
+PRY,Paraguay,ROW
+QAT,Qatar,ROW
+ROU,Romania,EUR
+RUS,USSR/Russian Federation (1990/1991),ROW
+RWA,Rwanda,ROW
+SAU,Saudi Arabia,ROW
+SDS,South Sudan,ROW
+SEN,Senegal,ROW
+SGP,Singapore,ROW
+SLE,Sierra Leone,ROW
+SLV,El Salvador,ROW
+SOM,Somalia,ROW
+SRB,Yugoslavia/Serbia (1991/1992),ROW
+SDN,Sudan/North Sudan (2010/2011),ROW
+SVK,Slovakia,EUR
+SVN,Slovenia,EUR
+SWE,Sweden,EUR
+SYR,Syria,ROW
+TCD,Chad,ROW
+TGO,Togo,ROW
+THA,Thailand,ROW
+TJK,Tajikistan,ROW
+TKM,Turkmenistan,ROW
+TUN,Tunisia,ROW
+TUR,Turkey,ROW
+TZA,Tanzania,ROW
+UGA,Uganda,ROW
+UKR,Ukraine,ROW
+URY,Uruguay,ROW
+USA,United States of America,ROW
+UZB,Uzbekistan,ROW
+VEN,Venezuela,ROW
+VNM,Viet Nam,ROW
+YEM,Yemen Arab Republic/Yemen (1990/1991),ROW
+ZAF,South Africa,ROW
+ZMB,Zambia,ROW
+ZWE,Zimbabwe,ROW
