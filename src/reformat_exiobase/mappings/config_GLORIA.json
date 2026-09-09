@@ -1,0 +1,22 @@
+{
+    "input_files": {
+        "factor_inputs_subfolder": "VA",
+        "F": "F.txt",
+        "Z": "Z.txt",
+        "Y": "Y.txt"
+    },
+    "mapping_files": {
+        "standard": {
+            "reformat_file": "map_reformat_GLORIA.csv",
+            "gtap_file": "map_GTAP_format.xlsx",
+            "gtap_sheet_cost": "Cost structure",
+            "gtap_sheet_cons": "Consumption structure"
+        },
+        "inventories": {
+            "reformat_file": "map_reformat_GLORIA_inventories.csv",
+            "gtap_file": "map_GTAP_format.xlsx",
+            "gtap_sheet_cost": "Cost structure",
+            "gtap_sheet_cons": "Cons structure inventories"
+        }
+    }
+}

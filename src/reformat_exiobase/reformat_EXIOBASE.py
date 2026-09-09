@@ -28,6 +28,30 @@ def final_demand_agents(map_final_demand):
     return map_final_demand["SCAF"].loc[map_final_demand["EXIOBASE_file"] == "Y"].unique()
 
 
+def reorder_io_columns(df, desired_sector_order):
+    order_map = {sector: i for i, sector in enumerate(desired_sector_order)}
+    new_cols = sorted(
+        df.columns,
+        key=lambda x: (x[0], order_map.get(x[1], float('inf')))
+    )
+    return df[new_cols]
+
+
+def reorder_io_rows(df, desired_sector_order):
+    order_map = {sector: i for i, sector in enumerate(desired_sector_order)}
+    new_idx = sorted(
+        df.index,
+        key=lambda x: (x[0], order_map.get(x[1], float('inf')))
+    )
+    return df.loc[new_idx]
+
+
+def reorder_io_matrix(df, desired_sector_order):
+    df = reorder_io_rows(df, desired_sector_order)
+    df = reorder_io_columns(df, desired_sector_order)
+    return df
+
+
 def reallocate_G_I_energy_to_C(Y, energy_sectors):
     """
     For each column region in Y, move 'Final consumption expenditure by government',
@@ -462,150 +486,16 @@ def check_unbalance(regional_IOTs_dict, len_sectors):
     return unbalance_by_region
 
 
-##########################################
-##########################################
-################ REFORMAT ################
-##########################################
-##########################################
+def build_regional_IOTs(regions, sectors, map_GTAP_cost_structure, map_GTAP_consumption_structure,
+                         intermediate_dom, intermediate_imp, L, K, R, M, X, production_taxes,
+                         imp_intermediate_cons_tax, dom_intermediate_cons_tax, cons_taxes, total_demand,
+                         add_inventories):
+    """Assemble the regional_IOT_format-shaped table (per region) from already-computed components.
 
-
-def reformat_EXIOBASE(aggregation_folder, reformat_folder, energy_sectors=None, sectors_order=[], add_inventories = True):
-
-    ###########################
-    #### IMPORT DATABASES #####
-    ###########################
-    with pkg_resources.open_text(mappings, "config_EXIOBASE.json") as f:
-        exio_config = json.load(f)
-
-    input_files = exio_config["input_files"]
-    F = pd.read_csv(f"{aggregation_folder}/{input_files['factor_inputs_subfolder']}/{input_files['F']}", delimiter="\t",
-                    header=[0, 1], index_col=0)  # Factors of productions/stressors/impacts
-    Z = pd.read_csv(f"{aggregation_folder}/{input_files['Z']}", delimiter="\t",
-                    header=[0, 1], index_col=[0, 1])  # flow/transactions matrix
-    Y = pd.read_csv(f"{aggregation_folder}/{input_files['Y']}", delimiter="\t",
-                    header=[0, 1], index_col=[0, 1])  # final demand
-
-    key = "inventories" if add_inventories else "standard"
-    config = exio_config["mapping_files"][key]
-
-    with pkg_resources.open_text(mappings, config["reformat_file"]) as f:
-        map_final_demand = pd.read_csv(f)
-
-    with pkg_resources.open_binary(mappings, config["gtap_file"]) as f:
-        map_GTAP_cost_structure = pd.read_excel(f, sheet_name=config["gtap_sheet_cost"], header=None)
-        f.seek(0)
-        map_GTAP_consumption_structure = pd.read_excel(f, sheet_name=config["gtap_sheet_cons"], header=None)
-
-    ###############################
-    #### CHANGE SECTORS ORDER #####
-    ###############################
-
-    regions = F.columns.get_level_values(0).unique()
-
-    if sectors_order == []:
-        sectors = F.columns.get_level_values(1).unique()
-    else:
-        sectors = sectors_order
-
-
-    def reorder_io_columns(df, desired_sector_order):
-        order_map = {sector: i for i,
-                     sector in enumerate(desired_sector_order)}
-        new_cols = sorted(
-            df.columns,
-            key=lambda x: (x[0], order_map.get(x[1], float('inf')))
-        )
-        return df[new_cols]
-
-    def reorder_io_rows(df, desired_sector_order):
-        order_map = {sector: i for i,
-                     sector in enumerate(desired_sector_order)}
-        new_idx = sorted(
-            df.index,
-            key=lambda x: (x[0], order_map.get(x[1], float('inf')))
-        )
-        return df.loc[new_idx]
-
-    def reorder_io_matrix(df, desired_sector_order):
-        df = reorder_io_rows(df, desired_sector_order)
-        df = reorder_io_columns(df, desired_sector_order)
-        return df
-
-    F = reorder_io_columns(F, sectors)
-    Y = reorder_io_rows(Y, sectors)
-    Z = reorder_io_matrix(Z, sectors)
-
-    if energy_sectors is not None:
-        Y = reallocate_G_I_energy_to_C(Y, energy_sectors)
-    
-    #####################################
-    ### INTERMEDIATE AND FINAL DEMAND ###
-    #####################################
-
-    intermediate_dom = compute_intermediate_domestic_demand(Z)
-
-    intermediate_imp = compute_intermediate_imports(Z)
-
-    fd_dom = compute_final_demand_domestic(Y, map_final_demand)
-
-    fd_imp = compute_final_demand_imported(Y, map_final_demand)
-
-    total_demand = concatenate_total_demand(fd_dom, fd_imp, intermediate_dom, intermediate_imp)
-
-    ###################################################
-    ##### REALLOCATION OF TAXES ON CONSUMPTION ########
-    ###################################################
-
-   #there is a unique tax rate paid by all consumers per product purchased per region
-    tax_rates = adjust_tax_rates(Z, Y, F, map_final_demand)
-
-    tax_rates_df = disaggregate_tax(tax_rates, Z, Y, map_final_demand)
-
-    net_flows = pd.concat([Z, Y], axis=1) - tax_rates_df
-
-    ############################################
-    ##### IMPORT AND EXPORT NET OF TAXES #######
-    ############################################
-
-    M = compute_imports(net_flows)
-
-    X = compute_exports(net_flows)
-
-    ##################################################
-    ##### ALLOCATE CONSUMPTION TAXES TO CONSUMERS ####
-    ##################################################
-    
-    imp_intermediate_cons_tax = compute_intermediate_imports(tax_rates_df[Z.columns]).T
-    dom_intermediate_cons_tax = compute_intermediate_domestic_demand(tax_rates_df[Z.columns]).T
-    
-    fd_taxes_imp = compute_final_demand_imported(tax_rates_df[Y.columns], map_final_demand)
-    fd_taxes_dom = compute_final_demand_domestic(tax_rates_df[Y.columns], map_final_demand)
-    
-    cons_taxes = {"imp": {}, "dom": {}}
-
-    for agent in final_demand_agents(map_final_demand):
-        cons_taxes["imp"][agent] = fd_taxes_imp[agent].to_frame().T
-        cons_taxes["dom"][agent] = fd_taxes_dom[agent].to_frame().T
-
-
-    ################################
-    ##### TAXES ON PRODUCTION ######
-    ################################
-
-    production_taxes = F.loc[EXIOBASE_name("Production_taxes", map_final_demand)]
-
-    ################################
-    ######### VALUE ADDED ##########
-    ################################
-
-    L_raw = F.loc[EXIOBASE_name("L", map_final_demand)].sum(axis=0)
-    K_raw = F.loc[EXIOBASE_name("K", map_final_demand)].sum(axis=0)
-    R_raw = F.loc[EXIOBASE_name("R", map_final_demand)].sum(axis=0)
-
-    L = L_raw.to_frame().T.rename(index={0: 'L'})
-    K = K_raw.to_frame().T.rename(index={0: 'K'})
-    R = R_raw.to_frame().T.rename(index={0: 'R'})
-
+    Dataset-agnostic: only cares about the shapes of its inputs, not how they were computed, so
+    it's shared between reformat_EXIOBASE (least-squares tax reconciliation) and reformat_GLORIA
+    (direct proportional tax allocation).
+    """
     ########################
     #### create indexes ####
     ########################
@@ -624,7 +514,7 @@ def reformat_EXIOBASE(aggregation_folder, reformat_folder, energy_sectors=None, 
 
     # Inizializza tutto a NaN
     arr = np.full((len(row_index) , len(col_index) ), np.nan)
-    
+
     # Imposta bande di zeri
     arr[:len(sectors), :] = 0.0       # prime N righe
     arr[:, :len(sectors)] = 0.0       # prime N colonne
@@ -798,18 +688,12 @@ def reformat_EXIOBASE(aggregation_folder, reformat_folder, energy_sectors=None, 
         fill_reformat_df_columnwise(
             df_dict[r], col_start, sum_col, row_start, row_end)
 
-    ##########################
-    ### verify equilibrium ###
-    ##########################
-    
-    unbalance_by_region = check_unbalance(df_dict, len(sectors))
+    return df_dict
 
-    ####################
-    ###### TO CSV ######
-    ####################
 
-    for r in regions:
-        df = df_dict[r].copy()
+def write_regional_IOTs(df_dict, reformat_folder):
+    for r, df in df_dict.items():
+        df = df.copy()
 
         # Rimuovi i nomi dei livelli (non i valori) se necessario
         df.index.names = [None] * df.index.nlevels
@@ -825,3 +709,263 @@ def reformat_EXIOBASE(aggregation_folder, reformat_folder, energy_sectors=None, 
         df.to_csv(reformat_folder + "/" + r + ".csv", na_rep='', encoding='utf-8-sig')
 
     print("Reformatted tables available at " + reformat_folder)
+
+
+##########################################
+##########################################
+################ REFORMAT ################
+##########################################
+##########################################
+
+
+def _load_config_and_mapping(config_file, add_inventories):
+    with pkg_resources.open_text(mappings, config_file) as f:
+        io_config = json.load(f)
+
+    key = "inventories" if add_inventories else "standard"
+    mapping_config = io_config["mapping_files"][key]
+
+    with pkg_resources.open_text(mappings, mapping_config["reformat_file"]) as f:
+        map_final_demand = pd.read_csv(f)
+
+    with pkg_resources.open_binary(mappings, mapping_config["gtap_file"]) as f:
+        map_GTAP_cost_structure = pd.read_excel(f, sheet_name=mapping_config["gtap_sheet_cost"], header=None)
+        f.seek(0)
+        map_GTAP_consumption_structure = pd.read_excel(f, sheet_name=mapping_config["gtap_sheet_cons"], header=None)
+
+    return io_config, map_final_demand, map_GTAP_cost_structure, map_GTAP_consumption_structure
+
+
+def _load_FZY(aggregation_folder, io_config, sectors_order):
+    input_files = io_config["input_files"]
+    F = pd.read_csv(f"{aggregation_folder}/{input_files['factor_inputs_subfolder']}/{input_files['F']}", delimiter="\t",
+                    header=[0, 1], index_col=0)  # Factors of productions/stressors/impacts
+    Z = pd.read_csv(f"{aggregation_folder}/{input_files['Z']}", delimiter="\t",
+                    header=[0, 1], index_col=[0, 1])  # flow/transactions matrix
+    Y = pd.read_csv(f"{aggregation_folder}/{input_files['Y']}", delimiter="\t",
+                    header=[0, 1], index_col=[0, 1])  # final demand
+
+    regions = F.columns.get_level_values(0).unique()
+    sectors = F.columns.get_level_values(1).unique() if sectors_order == [] else sectors_order
+
+    F = reorder_io_columns(F, sectors)
+    Y = reorder_io_rows(Y, sectors)
+    Z = reorder_io_matrix(Z, sectors)
+
+    return F, Z, Y, regions, sectors
+
+
+def _value_added_LKR(F, map_final_demand):
+    L_raw = F.loc[EXIOBASE_name("L", map_final_demand)].sum(axis=0)
+    K_raw = F.loc[EXIOBASE_name("K", map_final_demand)].sum(axis=0)
+    R_raw = F.loc[EXIOBASE_name("R", map_final_demand)].sum(axis=0)
+
+    L = L_raw.to_frame().T.rename(index={0: 'L'})
+    K = K_raw.to_frame().T.rename(index={0: 'K'})
+    R = R_raw.to_frame().T.rename(index={0: 'R'})
+    return L, K, R
+
+
+def reformat_EXIOBASE(aggregation_folder, reformat_folder, energy_sectors=None, sectors_order=[], add_inventories=True):
+
+    ###########################
+    #### IMPORT DATABASES #####
+    ###########################
+    io_config, map_final_demand, map_GTAP_cost_structure, map_GTAP_consumption_structure = \
+        _load_config_and_mapping("config_EXIOBASE.json", add_inventories)
+
+    F, Z, Y, regions, sectors = _load_FZY(aggregation_folder, io_config, sectors_order)
+
+    if energy_sectors is not None:
+        Y = reallocate_G_I_energy_to_C(Y, energy_sectors)
+
+    #####################################
+    ### INTERMEDIATE AND FINAL DEMAND ###
+    #####################################
+
+    intermediate_dom = compute_intermediate_domestic_demand(Z)
+
+    intermediate_imp = compute_intermediate_imports(Z)
+
+    fd_dom = compute_final_demand_domestic(Y, map_final_demand)
+
+    fd_imp = compute_final_demand_imported(Y, map_final_demand)
+
+    total_demand = concatenate_total_demand(fd_dom, fd_imp, intermediate_dom, intermediate_imp)
+
+    ###################################################
+    ##### REALLOCATION OF TAXES ON CONSUMPTION ########
+    ###################################################
+
+   #there is a unique tax rate paid by all consumers per product purchased per region
+    tax_rates = adjust_tax_rates(Z, Y, F, map_final_demand)
+
+    tax_rates_df = disaggregate_tax(tax_rates, Z, Y, map_final_demand)
+
+    net_flows = pd.concat([Z, Y], axis=1) - tax_rates_df
+
+    ############################################
+    ##### IMPORT AND EXPORT NET OF TAXES #######
+    ############################################
+
+    M = compute_imports(net_flows)
+
+    X = compute_exports(net_flows)
+
+    ##################################################
+    ##### ALLOCATE CONSUMPTION TAXES TO CONSUMERS ####
+    ##################################################
+
+    imp_intermediate_cons_tax = compute_intermediate_imports(tax_rates_df[Z.columns]).T
+    dom_intermediate_cons_tax = compute_intermediate_domestic_demand(tax_rates_df[Z.columns]).T
+
+    fd_taxes_imp = compute_final_demand_imported(tax_rates_df[Y.columns], map_final_demand)
+    fd_taxes_dom = compute_final_demand_domestic(tax_rates_df[Y.columns], map_final_demand)
+
+    cons_taxes = {"imp": {}, "dom": {}}
+
+    for agent in final_demand_agents(map_final_demand):
+        cons_taxes["imp"][agent] = fd_taxes_imp[agent].to_frame().T
+        cons_taxes["dom"][agent] = fd_taxes_dom[agent].to_frame().T
+
+
+    ################################
+    ##### TAXES ON PRODUCTION ######
+    ################################
+
+    production_taxes = F.loc[EXIOBASE_name("Production_taxes", map_final_demand)]
+
+    ################################
+    ######### VALUE ADDED ##########
+    ################################
+
+    L, K, R = _value_added_LKR(F, map_final_demand)
+
+    df_dict = build_regional_IOTs(regions, sectors, map_GTAP_cost_structure, map_GTAP_consumption_structure,
+                                   intermediate_dom, intermediate_imp, L, K, R, M, X, production_taxes,
+                                   imp_intermediate_cons_tax, dom_intermediate_cons_tax, cons_taxes, total_demand,
+                                   add_inventories)
+
+    ##########################
+    ### verify equilibrium ###
+    ##########################
+
+    check_unbalance(df_dict, len(sectors))
+
+    write_regional_IOTs(df_dict, reformat_folder)
+
+
+def reformat_GLORIA(aggregation_folder, reformat_folder, sectors_order=[], add_inventories=False):
+    """Reformat a GLORIA aggregation into the SCAF/GTAP-style regional tables.
+
+    Differs from reformat_EXIOBASE in two ways, both because GLORIA's Z/Y (the
+    "Basic prices" files) are already a self-consistent basic-price system on
+    their own -- confirmed against GLORIA's own National Accounting Identity
+    (Release Notes, "Note II") and empirically against aggregate_GLORIA's output:
+
+    - No energy reallocation (reallocate_G_I_energy_to_C hardcodes EXIOBASE-only
+      Y category strings and isn't meaningful for GLORIA's sector scheme).
+    - No adjust_tax_rates/disaggregate_tax least-squares reconciliation. GLORIA's
+      "Consumption_taxes" F-row (derived from the Markup004/005 tax/subsidy
+      files at parse time) is the basic-price-to-purchaser-price wedge, not a
+      reconciliation target the way EXIOBASE's own row is -- fitting it via
+      adjust_tax_rates measurably worsens the resulting table's balance.
+      Instead, it's allocated directly (a closed-form ad-valorem rate per
+      (region, sector), proportional to each final-demand agent's existing
+      basic-price share) and added symmetrically to both the demand side
+      (C/G/I) and the matching cost-side "Tax" rows, which is balance-neutral
+      by construction (adding the same amount to both sides of the identity
+      doesn't change their difference) while producing purchaser-price C/G/I
+      figures.
+    """
+
+    ###########################
+    #### IMPORT DATABASES #####
+    ###########################
+    io_config, map_final_demand, map_GTAP_cost_structure, map_GTAP_consumption_structure = \
+        _load_config_and_mapping("config_GLORIA.json", add_inventories)
+
+    F, Z, Y, regions, sectors = _load_FZY(aggregation_folder, io_config, sectors_order)
+
+    #####################################
+    ### INTERMEDIATE AND FINAL DEMAND ###
+    #####################################
+
+    intermediate_dom = compute_intermediate_domestic_demand(Z)
+
+    intermediate_imp = compute_intermediate_imports(Z)
+
+    fd_dom = compute_final_demand_domestic(Y, map_final_demand)
+
+    fd_imp = compute_final_demand_imported(Y, map_final_demand)
+
+    ###################################################
+    ##### DIRECT ALLOCATION OF SALES TAX ##############
+    ###################################################
+
+    net_sales_tax = F.loc[EXIOBASE_name("Consumption_taxes", map_final_demand)].iloc[0]
+
+    exempt_names = set(exempt_from_taxes(map_final_demand))
+    agents = final_demand_agents(map_final_demand)
+    taxable_agents = [a for a in agents if not set(EXIOBASE_name(a, map_final_demand)).issubset(exempt_names)]
+
+    taxable_base = sum((fd_dom[a] + fd_imp[a] for a in taxable_agents))
+    tax_rate = (net_sales_tax / taxable_base).replace([np.inf, -np.inf], 0.0).fillna(0.0)
+
+    fd_dom_taxed = fd_dom.copy()
+    fd_imp_taxed = fd_imp.copy()
+    cons_taxes = {"imp": {}, "dom": {}}
+    for agent in agents:
+        if agent in taxable_agents:
+            dom_tax = fd_dom[agent] * tax_rate
+            imp_tax = fd_imp[agent] * tax_rate
+            fd_dom_taxed[agent] = fd_dom[agent] + dom_tax
+            fd_imp_taxed[agent] = fd_imp[agent] + imp_tax
+        else:
+            dom_tax = fd_dom[agent] * 0.0
+            imp_tax = fd_imp[agent] * 0.0
+        cons_taxes["dom"][agent] = dom_tax.to_frame().T
+        cons_taxes["imp"][agent] = imp_tax.to_frame().T
+
+    total_demand = concatenate_total_demand(fd_dom_taxed, fd_imp_taxed, intermediate_dom, intermediate_imp)
+
+    # intermediate (Z) purchases stay at basic price -- tax is only added to
+    # final-demand consumption agents, per the above -- so these template rows are zero.
+    imp_intermediate_cons_tax = compute_intermediate_imports(Z).T * 0.0
+    dom_intermediate_cons_tax = compute_intermediate_domestic_demand(Z).T * 0.0
+
+    ############################################
+    ##### IMPORT AND EXPORT #####################
+    ############################################
+
+    # No de-taxing needed: Z/Y are basic price already, nothing to strip out.
+    flows = pd.concat([Z, Y], axis=1)
+
+    M = compute_imports(flows)
+
+    X = compute_exports(flows)
+
+    ################################
+    ##### TAXES ON PRODUCTION ######
+    ################################
+
+    production_taxes = F.loc[EXIOBASE_name("Production_taxes", map_final_demand)]
+
+    ################################
+    ######### VALUE ADDED ##########
+    ################################
+
+    L, K, R = _value_added_LKR(F, map_final_demand)
+
+    df_dict = build_regional_IOTs(regions, sectors, map_GTAP_cost_structure, map_GTAP_consumption_structure,
+                                   intermediate_dom, intermediate_imp, L, K, R, M, X, production_taxes,
+                                   imp_intermediate_cons_tax, dom_intermediate_cons_tax, cons_taxes, total_demand,
+                                   add_inventories)
+
+    ##########################
+    ### verify equilibrium ###
+    ##########################
+
+    check_unbalance(df_dict, len(sectors))
+
+    write_regional_IOTs(df_dict, reformat_folder)
