@@ -21,6 +21,7 @@ from .reformat_lib import (
     adjust_tax_rates,
     compute_imports,
     compute_exports,
+    zero_out_regional_noise,
     check_unbalance,
     attribute_unbalance_to_final_consumers,
     build_regional_IOTs,
@@ -117,6 +118,11 @@ def reformat_EXIOBASE(aggregation_folder, reformat_folder, energy_sectors=None, 
     ##########################
     ### verify equilibrium ###
     ##########################
+
+    (intermediate_dom, intermediate_imp, L, K, R, M, X, production_taxes,
+     imp_intermediate_cons_tax, dom_intermediate_cons_tax, cons_taxes, total_demand) = zero_out_regional_noise(
+        intermediate_dom, intermediate_imp, L, K, R, M, X, production_taxes,
+        imp_intermediate_cons_tax, dom_intermediate_cons_tax, cons_taxes, total_demand)
 
     check_unbalance(regions, intermediate_dom, intermediate_imp, L, K, R, M, X, production_taxes,
                      imp_intermediate_cons_tax, dom_intermediate_cons_tax, cons_taxes, total_demand)
@@ -240,6 +246,11 @@ def reformat_GLORIA(aggregation_folder, reformat_folder, sectors_order=[], add_i
     ##########################
     ### verify equilibrium ###
     ##########################
+
+    (intermediate_dom, intermediate_imp, L, K, R, M, X, production_taxes,
+     imp_intermediate_cons_tax, dom_intermediate_cons_tax, cons_taxes, total_demand) = zero_out_regional_noise(
+        intermediate_dom, intermediate_imp, L, K, R, M, X, production_taxes,
+        imp_intermediate_cons_tax, dom_intermediate_cons_tax, cons_taxes, total_demand)
 
     check_unbalance(regions, intermediate_dom, intermediate_imp, L, K, R, M, X, production_taxes,
                      imp_intermediate_cons_tax, dom_intermediate_cons_tax, cons_taxes, total_demand)

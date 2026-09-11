@@ -554,6 +554,68 @@ def _region_cost_and_use(r, intermediate_dom, intermediate_imp, L, K, R, M, prod
     return cost.reindex(sub_demand.index), use.reindex(sub_demand.index), sub_demand
 
 
+def _zero_negligible_values_by_region(df, threshold=1e-8):
+    """
+    For each region, zero out values whose absolute size is negligible
+    relative to that region's own scale (< threshold * that region's max
+    absolute value). Cleans up floating-point noise -- e.g. residue from the
+    adjust_tax_rates least-squares fit -- before it's picked up by
+    check_unbalance. 'region' lives on the row axis for some callers and the
+    column axis for others (see zero_out_regional_noise), so detect which
+    and slice there.
+    """
+    df = df.copy()
+
+    if "region" in (df.index.names or []):
+        region_level = df.index.get_level_values("region")
+        for r in region_level.unique():
+            mask = region_level == r
+            block = df.loc[mask]
+            max_val = block.abs().to_numpy().max() if block.size else 0.0
+            df.loc[mask] = block.mask(block.abs() < threshold * max_val, 0.0)
+    elif "region" in (df.columns.names or []):
+        region_level = df.columns.get_level_values("region")
+        for r in region_level.unique():
+            mask = region_level == r
+            block = df.loc[:, mask]
+            max_val = block.abs().to_numpy().max() if block.size else 0.0
+            df.loc[:, mask] = block.mask(block.abs() < threshold * max_val, 0.0)
+    else:
+        raise ValueError("DataFrame has no 'region' level on either axis.")
+
+    return df
+
+
+def zero_out_regional_noise(intermediate_dom, intermediate_imp, L, K, R, M, X, production_taxes,
+                             imp_intermediate_cons_tax, dom_intermediate_cons_tax, cons_taxes, total_demand,
+                             threshold=1e-8):
+    """
+    Apply _zero_negligible_values_by_region to every pre-build component,
+    including each per-agent DataFrame inside cons_taxes. Called right
+    before check_unbalance in both reformat_EXIOBASE and reformat_GLORIA so
+    the cleaned values flow through the rest of the pipeline (unbalance
+    attribution, build_regional_IOTs, CSV output) too.
+    """
+    intermediate_dom = _zero_negligible_values_by_region(intermediate_dom, threshold)
+    intermediate_imp = _zero_negligible_values_by_region(intermediate_imp, threshold)
+    L = _zero_negligible_values_by_region(L, threshold)
+    K = _zero_negligible_values_by_region(K, threshold)
+    R = _zero_negligible_values_by_region(R, threshold)
+    M = _zero_negligible_values_by_region(M, threshold)
+    X = _zero_negligible_values_by_region(X, threshold)
+    production_taxes = _zero_negligible_values_by_region(production_taxes, threshold)
+    imp_intermediate_cons_tax = _zero_negligible_values_by_region(imp_intermediate_cons_tax, threshold)
+    dom_intermediate_cons_tax = _zero_negligible_values_by_region(dom_intermediate_cons_tax, threshold)
+    cons_taxes = {
+        imp_dom: {agent: _zero_negligible_values_by_region(df, threshold) for agent, df in agents.items()}
+        for imp_dom, agents in cons_taxes.items()
+    }
+    total_demand = _zero_negligible_values_by_region(total_demand, threshold)
+
+    return (intermediate_dom, intermediate_imp, L, K, R, M, X, production_taxes,
+            imp_intermediate_cons_tax, dom_intermediate_cons_tax, cons_taxes, total_demand)
+
+
 def check_unbalance(regions, intermediate_dom, intermediate_imp, L, K, R, M, X, production_taxes,
                      imp_intermediate_cons_tax, dom_intermediate_cons_tax, cons_taxes, total_demand,
                      error_threshold=0.01, warning_threshold=1e-4):
