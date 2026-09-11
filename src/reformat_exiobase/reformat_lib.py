@@ -5,6 +5,7 @@ Created on Thu Mar 13 14:20:45 2025
 """
 
 import json
+import warnings
 import pandas as pd
 import numpy as np
 from . import mappings
@@ -96,9 +97,6 @@ def reallocate_G_I_energy_to_C(Y, energy_sectors):
 
 
 
-
-
-
 def compute_intermediate_domestic_demand(Z):
     regions = Z.columns.get_level_values(0).unique()
     sectors = Z.index.get_level_values(1).unique()
@@ -153,7 +151,7 @@ def aggregate_final_demand_agents(Y, map_final_demand):
             EXIOBASE_categories = EXIOBASE_name(c, map_final_demand)  # Map SCAF category to EXIOBASE ones
 
             final_demand_aggregated_agents.loc[:, (r, c)] = Y.loc[
-                :, 
+                :,
                 (r, EXIOBASE_categories)
             ].sum(axis=1)
 
@@ -197,9 +195,9 @@ def compute_final_demand_imported(Y, map_final_demand):
 
     # Initialize the output DataFrame
     fd_imp = pd.DataFrame(
-        0.0, 
-        index=fd_aggregated_agents.index, 
-        columns=categories, 
+        0.0,
+        index=fd_aggregated_agents.index,
+        columns=categories,
         dtype=np.float64
     )
     # Loop over each region, category, and sector
@@ -265,10 +263,10 @@ def concatenate_total_demand(fd_dom, fd_imp, intermediate_dom, intermediate_imp)
     imp_dom_index = (
         ["imp"] * len(sectors) + ["dom"] * len(sectors) +
         ["imp", "dom"] * len(final_demand_agents))
-    
+
     category_index = (
         list(sectors) * 2 + list(np.repeat(final_demand_agents, 2)))
-    
+
     column_tuples = list(zip(imp_dom_index, category_index))
     final_columns = pd.MultiIndex.from_tuples(column_tuples, names=["imp_dom", "category"])
 
@@ -315,9 +313,9 @@ def disaggregate_tax(tax_rates,Z,Y, map_final_demand):
 
 def adjust_tax_rates(Z: pd.DataFrame, Y: pd.DataFrame, F: pd.DataFrame, map_final_demand) -> pd.Series:
 
-    #the taxes on consumption in the file F.txt for region R and sector S include 
+    #the taxes on consumption in the file F.txt for region R and sector S include
     #taxes that are paid abroad for the consumption of the good S produced in R.
-    # we extract: 
+    # we extract:
     # -import and export net of taxes.
     # -the tax that is paid on good S consumed in region R and of all origin.
     # the resulting national account is balanced
@@ -330,9 +328,9 @@ def adjust_tax_rates(Z: pd.DataFrame, Y: pd.DataFrame, F: pd.DataFrame, map_fina
         return discrepancy.values[0]
 
     tax_guess = pd.Series(0.01, index=Z.columns)
-    
+
     result = least_squares(reallocate_tax, tax_guess.values, args=(tax_guess.index, Z, Y, F, map_final_demand), verbose=2)
-    
+
     return pd.Series(result.x, index=Z.columns)
 
 
@@ -465,25 +463,172 @@ def fill_reformat_df_columnwise(reformat_df, col_start, allocation_df, row_start
     return col_end
 
 
-def check_unbalance(regional_IOTs_dict, len_sectors):
+def _report_unbalance(per_region, error_threshold, warning_threshold):
+    """
+    Shared threshold/reporting logic for both `check_unbalance` (pre-build,
+    computed from the raw components) and `check_unbalance_final_format`
+    (post-build, read off the assembled GTAP-shaped table) -- factored out
+    so the two share one implementation of "how big is too big" instead of
+    duplicating it.
+
+    Parameters
+    ----------
+    per_region : dict
+        {region: (sector_labels, cost_array, use_array)}, one entry per
+        region. `cost_array`/`use_array` are 1D arrays of total production
+        cost / total use per sector (same order as `sector_labels`); the
+        unbalance is measured relative to each sector's own scale (mean of
+        its cost and use) so it is comparable across sectors of very
+        different size.
+
+    Raises a ValueError if the largest relative unbalance (across all
+    regions/sectors) exceeds `error_threshold` (default 1%). Otherwise,
+    issues a UserWarning listing every (region, sector) pair whose relative
+    unbalance exceeds `warning_threshold` (default 1e-4).
+
+    Returns
+    -------
+    dict
+        {region: max relative unbalance in that region}.
+    """
     max_unbalance = 0
     unbalance_by_region = {}
+    flagged = []  # (relative_unbalance, region, sector)
 
-    for r, df in regional_IOTs_dict.items():
-        sum_rows = df.xs('∑', level='Subcategory').sum()[:len_sectors]
-        sum_cols = df.xs('∑', level='Subcategory', axis=1).sum(axis=1)[:len_sectors]
-        
-        unbalance_vector = abs(sum_cols.to_numpy().flatten() -
-                            sum_rows.to_numpy().flatten())
+    for r, (sector_labels, cost_arr, use_arr) in per_region.items():
+        abs_unbalance = np.abs(use_arr - cost_arr)
+        scale = (np.abs(cost_arr) + np.abs(use_arr)) / 2
+        relative_unbalance = np.divide(
+            abs_unbalance, scale, out=np.zeros_like(abs_unbalance), where=scale != 0
+        )
 
-        max_unbalance_r = unbalance_vector.max()
-
+        max_unbalance_r = relative_unbalance.max() if len(relative_unbalance) else 0.0
         unbalance_by_region[r] = max_unbalance_r
         if max_unbalance_r > max_unbalance:
             max_unbalance = max_unbalance_r
 
+        for sector, rel in zip(sector_labels, relative_unbalance):
+            if rel > warning_threshold:
+                flagged.append((rel, r, sector))
+
     print("Max unbalance across regions:", max_unbalance)
+
+    if flagged:
+        flagged.sort(reverse=True)
+        details = "; ".join(f"{r}/{s}: {rel:.4%}" for rel, r, s in flagged)
+        if max_unbalance > error_threshold:
+            raise ValueError(
+                f"Max unbalance ({max_unbalance:.4%}) exceeds the {error_threshold:.2%} error "
+                f"threshold. Offending region/sector pairs (unbalance > {warning_threshold:.4%}): {details}"
+            )
+        warnings.warn(
+            f"Unbalance exceeds {warning_threshold:.4%} for the following region/sector pairs: {details}"
+        )
+
     return unbalance_by_region
+
+
+def _region_cost_and_use(r, intermediate_dom, intermediate_imp, L, K, R, M, production_taxes,
+                          imp_intermediate_cons_tax, dom_intermediate_cons_tax, cons_taxes, total_demand, X):
+    """
+    Per-(region, sector) total production cost vs. total use, computed
+    directly from the pre-build components -- mirrors exactly what
+    `check_unbalance_final_format` would read off the '∑'-labeled rows/
+    columns of the table `build_regional_IOTs` assembles from these same
+    inputs (verified empirically against `build_regional_IOTs`).
+    """
+    cost = (
+        intermediate_imp[r].sum(axis=0)
+        + intermediate_dom[r].sum(axis=0)
+        + pd.concat([L, K, R]).sum(axis=0)[r]
+        + M[r].sum(axis=0)
+        + production_taxes[r].sum(axis=0)
+        + imp_intermediate_cons_tax.loc[r].sum(axis=0)
+        + dom_intermediate_cons_tax.loc[r].sum(axis=0)
+        + cons_taxes["imp"]["I"][r].sum(axis=0) + cons_taxes["dom"]["I"][r].sum(axis=0)
+        + cons_taxes["imp"]["C"][r].sum(axis=0) + cons_taxes["dom"]["C"][r].sum(axis=0)
+        + cons_taxes["imp"]["G"][r].sum(axis=0) + cons_taxes["dom"]["G"][r].sum(axis=0)
+    )
+    sub_demand = total_demand.loc[r]
+    use = sub_demand.sum(axis=1) + X.loc[r]["X"]
+    return cost.reindex(sub_demand.index), use.reindex(sub_demand.index), sub_demand
+
+
+def check_unbalance(regions, intermediate_dom, intermediate_imp, L, K, R, M, X, production_taxes,
+                     imp_intermediate_cons_tax, dom_intermediate_cons_tax, cons_taxes, total_demand,
+                     error_threshold=0.01, warning_threshold=1e-4):
+    """
+    Check, for every region and sector, that total production cost matches
+    total use -- computed directly from the pre-build components, before
+    `build_regional_IOTs` assembles the final GTAP-shaped table. Same
+    print/warn/raise contract as `check_unbalance_final_format`.
+    """
+    per_region = {}
+    for r in regions:
+        cost, use, sub_demand = _region_cost_and_use(
+            r, intermediate_dom, intermediate_imp, L, K, R, M, production_taxes,
+            imp_intermediate_cons_tax, dom_intermediate_cons_tax, cons_taxes, total_demand, X)
+        per_region[r] = (sub_demand.index, cost.to_numpy(), use.to_numpy())
+    return _report_unbalance(per_region, error_threshold, warning_threshold)
+
+
+def attribute_unbalance_to_final_consumers(regions, intermediate_dom, intermediate_imp, L, K, R, M, X,
+                                            production_taxes, imp_intermediate_cons_tax,
+                                            dom_intermediate_cons_tax, cons_taxes, total_demand):
+    """
+    Attribute each (region, sector)'s cost/use discrepancy to its final
+    consumers -- household (C), government (G), investment (I) -- split
+    across their Imp/Dom cells in `total_demand`, proportional to each
+    cell's existing value. Sectors with zero combined C+G+I base are left
+    unchanged -- there's no basis for a proportional split, and any
+    residual unbalance for them will surface from
+    `check_unbalance_final_format` after building the table.
+
+    Mutates and returns `total_demand`.
+    """
+    demand_cols = [("imp", "C"), ("dom", "C"), ("imp", "G"), ("dom", "G"), ("imp", "I"), ("dom", "I")]
+    for r in regions:
+        cost, use, sub_demand = _region_cost_and_use(
+            r, intermediate_dom, intermediate_imp, L, K, R, M, production_taxes,
+            imp_intermediate_cons_tax, dom_intermediate_cons_tax, cons_taxes, total_demand, X)
+        diff = (cost - use).to_numpy()
+
+        base = sub_demand[demand_cols].to_numpy()
+        row_sums = base.sum(axis=1)
+        weights = np.divide(base, row_sums[:, None], out=np.zeros_like(base), where=row_sums[:, None] != 0)
+        new_base = base + weights * diff[:, None]
+
+        if (new_base < 0).any():
+            warnings.warn(
+                f"attribute_unbalance_to_final_consumers produced negative final-demand values in "
+                f"region {r!r}: the per-sector unbalance exceeded that sector's existing C/G/I base "
+                f"for at least one sector."
+            )
+
+        total_demand.loc[r, demand_cols] = new_base
+
+    return total_demand
+
+
+def check_unbalance_final_format(regional_IOTs_dict, len_sectors, error_threshold=0.01, warning_threshold=1e-4):
+    """
+    Check that each region's assembled IOT balances: for every sector, total
+    output (row sum) must match total input (column sum). The unbalance is
+    measured relative to the sector's own scale (mean of the row and column
+    sum) so it is comparable across sectors of very different size.
+
+    Run this after `build_regional_IOTs` (and ideally after
+    `check_unbalance`/`attribute_unbalance_to_final_consumers` have already
+    closed most of the gap upstream) as a final self-check before writing
+    output. Same print/warn/raise contract as `check_unbalance`.
+    """
+    per_region = {}
+    for r, df in regional_IOTs_dict.items():
+        sum_rows = df.xs('∑', level='Subcategory').sum()[:len_sectors]
+        sum_cols = df.xs('∑', level='Subcategory', axis=1).sum(axis=1)[:len_sectors]
+        sector_labels = sum_rows.index.get_level_values('Subcategory')
+        per_region[r] = (sector_labels, sum_rows.to_numpy().flatten(), sum_cols.to_numpy().flatten())
+    return _report_unbalance(per_region, error_threshold, warning_threshold)
 
 
 def build_regional_IOTs(regions, sectors, map_GTAP_cost_structure, map_GTAP_consumption_structure,
@@ -711,13 +856,6 @@ def write_regional_IOTs(df_dict, reformat_folder):
     print("Reformatted tables available at " + reformat_folder)
 
 
-##########################################
-##########################################
-################ REFORMAT ################
-##########################################
-##########################################
-
-
 def _load_config_and_mapping(config_file, add_inventories):
     with pkg_resources.open_text(mappings, config_file) as f:
         io_config = json.load(f)
@@ -764,208 +902,3 @@ def _value_added_LKR(F, map_final_demand):
     K = K_raw.to_frame().T.rename(index={0: 'K'})
     R = R_raw.to_frame().T.rename(index={0: 'R'})
     return L, K, R
-
-
-def reformat_EXIOBASE(aggregation_folder, reformat_folder, energy_sectors=None, sectors_order=[], add_inventories=True):
-
-    ###########################
-    #### IMPORT DATABASES #####
-    ###########################
-    io_config, map_final_demand, map_GTAP_cost_structure, map_GTAP_consumption_structure = \
-        _load_config_and_mapping("config_EXIOBASE.json", add_inventories)
-
-    F, Z, Y, regions, sectors = _load_FZY(aggregation_folder, io_config, sectors_order)
-
-    if energy_sectors is not None:
-        Y = reallocate_G_I_energy_to_C(Y, energy_sectors)
-
-    #####################################
-    ### INTERMEDIATE AND FINAL DEMAND ###
-    #####################################
-
-    intermediate_dom = compute_intermediate_domestic_demand(Z)
-
-    intermediate_imp = compute_intermediate_imports(Z)
-
-    fd_dom = compute_final_demand_domestic(Y, map_final_demand)
-
-    fd_imp = compute_final_demand_imported(Y, map_final_demand)
-
-    total_demand = concatenate_total_demand(fd_dom, fd_imp, intermediate_dom, intermediate_imp)
-
-    ###################################################
-    ##### REALLOCATION OF TAXES ON CONSUMPTION ########
-    ###################################################
-
-   #there is a unique tax rate paid by all consumers per product purchased per region
-    tax_rates = adjust_tax_rates(Z, Y, F, map_final_demand)
-
-    tax_rates_df = disaggregate_tax(tax_rates, Z, Y, map_final_demand)
-
-    net_flows = pd.concat([Z, Y], axis=1) - tax_rates_df
-
-    ############################################
-    ##### IMPORT AND EXPORT NET OF TAXES #######
-    ############################################
-
-    M = compute_imports(net_flows)
-
-    X = compute_exports(net_flows)
-
-    ##################################################
-    ##### ALLOCATE CONSUMPTION TAXES TO CONSUMERS ####
-    ##################################################
-
-    imp_intermediate_cons_tax = compute_intermediate_imports(tax_rates_df[Z.columns]).T
-    dom_intermediate_cons_tax = compute_intermediate_domestic_demand(tax_rates_df[Z.columns]).T
-
-    fd_taxes_imp = compute_final_demand_imported(tax_rates_df[Y.columns], map_final_demand)
-    fd_taxes_dom = compute_final_demand_domestic(tax_rates_df[Y.columns], map_final_demand)
-
-    cons_taxes = {"imp": {}, "dom": {}}
-
-    for agent in final_demand_agents(map_final_demand):
-        cons_taxes["imp"][agent] = fd_taxes_imp[agent].to_frame().T
-        cons_taxes["dom"][agent] = fd_taxes_dom[agent].to_frame().T
-
-
-    ################################
-    ##### TAXES ON PRODUCTION ######
-    ################################
-
-    production_taxes = F.loc[EXIOBASE_name("Production_taxes", map_final_demand)]
-
-    ################################
-    ######### VALUE ADDED ##########
-    ################################
-
-    L, K, R = _value_added_LKR(F, map_final_demand)
-
-    df_dict = build_regional_IOTs(regions, sectors, map_GTAP_cost_structure, map_GTAP_consumption_structure,
-                                   intermediate_dom, intermediate_imp, L, K, R, M, X, production_taxes,
-                                   imp_intermediate_cons_tax, dom_intermediate_cons_tax, cons_taxes, total_demand,
-                                   add_inventories)
-
-    ##########################
-    ### verify equilibrium ###
-    ##########################
-
-    check_unbalance(df_dict, len(sectors))
-
-    write_regional_IOTs(df_dict, reformat_folder)
-
-
-def reformat_GLORIA(aggregation_folder, reformat_folder, sectors_order=[], add_inventories=False):
-    """Reformat a GLORIA aggregation into the SCAF/GTAP-style regional tables.
-
-    Differs from reformat_EXIOBASE in two ways, both because GLORIA's Z/Y (the
-    "Basic prices" files) are already a self-consistent basic-price system on
-    their own -- confirmed against GLORIA's own National Accounting Identity
-    (Release Notes, "Note II") and empirically against aggregate_GLORIA's output:
-
-    - No energy reallocation (reallocate_G_I_energy_to_C hardcodes EXIOBASE-only
-      Y category strings and isn't meaningful for GLORIA's sector scheme).
-    - No adjust_tax_rates/disaggregate_tax least-squares reconciliation. GLORIA's
-      "Consumption_taxes" F-row (derived from the Markup004/005 tax/subsidy
-      files at parse time) is the basic-price-to-purchaser-price wedge, not a
-      reconciliation target the way EXIOBASE's own row is -- fitting it via
-      adjust_tax_rates measurably worsens the resulting table's balance.
-      Instead, it's allocated directly (a closed-form ad-valorem rate per
-      (region, sector), proportional to each final-demand agent's existing
-      basic-price share) and added symmetrically to both the demand side
-      (C/G/I) and the matching cost-side "Tax" rows, which is balance-neutral
-      by construction (adding the same amount to both sides of the identity
-      doesn't change their difference) while producing purchaser-price C/G/I
-      figures.
-    """
-
-    ###########################
-    #### IMPORT DATABASES #####
-    ###########################
-    io_config, map_final_demand, map_GTAP_cost_structure, map_GTAP_consumption_structure = \
-        _load_config_and_mapping("config_GLORIA.json", add_inventories)
-
-    F, Z, Y, regions, sectors = _load_FZY(aggregation_folder, io_config, sectors_order)
-
-    #####################################
-    ### INTERMEDIATE AND FINAL DEMAND ###
-    #####################################
-
-    intermediate_dom = compute_intermediate_domestic_demand(Z)
-
-    intermediate_imp = compute_intermediate_imports(Z)
-
-    fd_dom = compute_final_demand_domestic(Y, map_final_demand)
-
-    fd_imp = compute_final_demand_imported(Y, map_final_demand)
-
-    ###################################################
-    ##### DIRECT ALLOCATION OF SALES TAX ##############
-    ###################################################
-
-    net_sales_tax = F.loc[EXIOBASE_name("Consumption_taxes", map_final_demand)].iloc[0]
-
-    exempt_names = set(exempt_from_taxes(map_final_demand))
-    agents = final_demand_agents(map_final_demand)
-    taxable_agents = [a for a in agents if not set(EXIOBASE_name(a, map_final_demand)).issubset(exempt_names)]
-
-    taxable_base = sum((fd_dom[a] + fd_imp[a] for a in taxable_agents))
-    tax_rate = (net_sales_tax / taxable_base).replace([np.inf, -np.inf], 0.0).fillna(0.0)
-
-    fd_dom_taxed = fd_dom.copy()
-    fd_imp_taxed = fd_imp.copy()
-    cons_taxes = {"imp": {}, "dom": {}}
-    for agent in agents:
-        if agent in taxable_agents:
-            dom_tax = fd_dom[agent] * tax_rate
-            imp_tax = fd_imp[agent] * tax_rate
-            fd_dom_taxed[agent] = fd_dom[agent] + dom_tax
-            fd_imp_taxed[agent] = fd_imp[agent] + imp_tax
-        else:
-            dom_tax = fd_dom[agent] * 0.0
-            imp_tax = fd_imp[agent] * 0.0
-        cons_taxes["dom"][agent] = dom_tax.to_frame().T
-        cons_taxes["imp"][agent] = imp_tax.to_frame().T
-
-    total_demand = concatenate_total_demand(fd_dom_taxed, fd_imp_taxed, intermediate_dom, intermediate_imp)
-
-    # intermediate (Z) purchases stay at basic price -- tax is only added to
-    # final-demand consumption agents, per the above -- so these template rows are zero.
-    imp_intermediate_cons_tax = compute_intermediate_imports(Z).T * 0.0
-    dom_intermediate_cons_tax = compute_intermediate_domestic_demand(Z).T * 0.0
-
-    ############################################
-    ##### IMPORT AND EXPORT #####################
-    ############################################
-
-    # No de-taxing needed: Z/Y are basic price already, nothing to strip out.
-    flows = pd.concat([Z, Y], axis=1)
-
-    M = compute_imports(flows)
-
-    X = compute_exports(flows)
-
-    ################################
-    ##### TAXES ON PRODUCTION ######
-    ################################
-
-    production_taxes = F.loc[EXIOBASE_name("Production_taxes", map_final_demand)]
-
-    ################################
-    ######### VALUE ADDED ##########
-    ################################
-
-    L, K, R = _value_added_LKR(F, map_final_demand)
-
-    df_dict = build_regional_IOTs(regions, sectors, map_GTAP_cost_structure, map_GTAP_consumption_structure,
-                                   intermediate_dom, intermediate_imp, L, K, R, M, X, production_taxes,
-                                   imp_intermediate_cons_tax, dom_intermediate_cons_tax, cons_taxes, total_demand,
-                                   add_inventories)
-
-    ##########################
-    ### verify equilibrium ###
-    ##########################
-
-    check_unbalance(df_dict, len(sectors))
-
-    write_regional_IOTs(df_dict, reformat_folder)

@@ -14,7 +14,7 @@ reformat_EXIOBASE: Produces N CSV files—one for each region—containing a res
 
 aggregate_GLORIA: Parses a GLORIA MRIO release and aggregates it based on region and sector mappings provided by the user, mirroring aggregate_EXIOBASE. Parsing is done internally with parse_gloria_lowmem, a low-memory parser that reads GLORIA's large transaction files in chunks instead of loading them fully into memory.
 
-reformat_GLORIA: Produces the same SCAF/GTAP-style regional CSV output as reformat_EXIOBASE, adapted for GLORIA's basic-price system (no energy reallocation step, and a different consumption-tax allocation approach—see the function's docstring in reformat_EXIOBASE.py for details).
+reformat_GLORIA: Produces the same SCAF/GTAP-style regional CSV output as reformat_EXIOBASE, adapted for GLORIA's basic-price system (no energy reallocation step, and a different consumption-tax allocation approach—see the function's docstring in reformat_IOT.py for details).
 
 ## Installation
 

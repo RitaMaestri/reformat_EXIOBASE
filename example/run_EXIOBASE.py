@@ -1,4 +1,4 @@
-from reformat_exiobase.reformat_EXIOBASE import reformat_EXIOBASE
+from reformat_exiobase.reformat_IOT import reformat_EXIOBASE
 from reformat_exiobase.aggregate_EXIOBASE import aggregate_EXIOBASE
 from reformat_exiobase.download_EXIOBASE import download_EXIOBASE
 from pathlib import Path

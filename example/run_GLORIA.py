@@ -1,5 +1,5 @@
 from reformat_exiobase.aggregate_GLORIA import aggregate_GLORIA
-from reformat_exiobase.reformat_EXIOBASE import reformat_GLORIA
+from reformat_exiobase.reformat_IOT import reformat_GLORIA
 from pathlib import Path
 
 current_file = Path(__file__).resolve()
