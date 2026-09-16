@@ -38,19 +38,62 @@ def compute_net_production_taxes(va):
     return va.loc["Taxes on production D.29"] + va.loc["Subsidies on production D.39"]
 
 
-def compute_net_sales_taxes(mrio_path, year, version, is_industry, product_index, chunksize):
-    """Net taxes less subsidies on products purchased (region x sector, product/seller basis).
+def _stream_use_block_sum(csv_paths, is_industry, product_pos, industry_pos, product_index, industry_index, chunksize, label):
+    """Extract and sum the product-rows x industry-columns corner from one or more T-shaped csvs, streamed in chunks.
+
+    T004/T005 (taxes/subsidies on products) share T's exact row/column layout, so
+    this is the same slicing parse_gloria_lowmem already does inline for T itself to
+    build data["U"] -- factored out here so it can run again, unchanged, for T004 and
+    T005 without duplicating that loop. Accumulates every csv_path into one array
+    instead of building a separate full-size matrix per file and adding them
+    afterwards -- with each of these matrices already ~3GB at GLORIA's full
+    resolution, materializing T004's and T005's matrices at the same time (on top
+    of the V/U matrices already resident from the main T loop) is enough extra
+    memory pressure to risk exhausting available RAM.
+    """
+    arr = np.zeros((len(product_pos), len(industry_pos)), dtype=np.float64)
+    for csv_path in csv_paths:
+        cursor = 0
+        row = 0
+        file_label = f"{label} ({os.path.basename(csv_path)})"
+        for chunk in pd.read_csv(csv_path, header=None, chunksize=chunksize, dtype=np.float64):
+            n = chunk.shape[0]
+            chunk_is_industry = is_industry[cursor : cursor + n]
+            prod_rows = chunk.to_numpy()[~chunk_is_industry][:, industry_pos]
+            arr[row : row + prod_rows.shape[0], :] += prod_rows
+            row += prod_rows.shape[0]
+            cursor += n
+            print(f"  {file_label}: {cursor} rows", end="\r")
+        print(f"  {file_label}: {cursor} rows -- done")
+    return pd.DataFrame(arr, index=product_index, columns=industry_index)
+
+
+def _load_y_tax_block(csv_path, is_industry, product_index, y_columns):
+    """Load a Y004/Y005-shaped csv (same layout as Y) and keep only its product rows."""
+    values = pd.read_csv(csv_path, header=None, dtype=np.float64).to_numpy()[~is_industry]
+    return pd.DataFrame(values, index=product_index, columns=y_columns)
+
+
+def compute_net_sales_tax_matrices(mrio_path, year, version, is_industry, product_pos, industry_pos,
+                                    product_index, industry_index, y_columns, chunksize):
+    """Net taxes less subsidies on products purchased, at full seller x buyer resolution.
 
     GLORIA has no ready-made row for this (unlike production taxes). It's derived from
     the tax/subsidy markup matrices: Markup004 = taxes on products, Markup005 =
     subsidies on products, each published separately for the T (intermediate
-    transactions) and Y (final demand) matrices. Y's buyer side (final-demand
-    categories) has no sector dimension, so the only basis addable across both T and Y
-    is the product/seller sector: for each Product row, sum across every buyer column.
+    transactions) and Y (final demand) matrices.
+
+    Unlike a single collapsed total (the previous version of this function), this
+    keeps the full seller-row x buyer-column resolution -- shaped exactly like
+    data["U"]/data["Y"] -- so downstream code can attribute tax correctly per buying
+    sector and per domestic/imported source instead of applying one uniform rate to
+    every buyer (see reformat_lib.compute_real_consumption_taxes). It rides through
+    aggregate_GLORIA's region/sector aggregation the same way Z/Y do, since it shares
+    their exact row/column labeling.
 
     Subsidies (Markup005) are already stored as negative values in the raw files
-    (verified against the source CSVs), so netting against taxes (Markup004) is
-    addition, not subtraction.
+    (verified against the source CSVs, same convention used elsewhere in this
+    module), so netting against taxes (Markup004) is addition, not subtraction.
     """
     t004_path = _first_match(
         os.path.join(mrio_path, "Taxes on product"),
@@ -69,27 +112,27 @@ def compute_net_sales_taxes(mrio_path, year, version, is_industry, product_index
         f"_120secMother_AllCountries_002_Y-Results_{str(year)}_0{str(version)}_Markup005(full).csv",
     )
 
-    n_product_rows = int((~is_industry).sum())
+    U_tax_net = _stream_use_block_sum(
+        [t004_path, t005_path], is_industry, product_pos, industry_pos, product_index, industry_index, chunksize,
+        "T004/T005 matrix",
+    )
+    Y_tax_net = (
+        _load_y_tax_block(y004_path, is_industry, product_index, y_columns)
+        + _load_y_tax_block(y005_path, is_industry, product_index, y_columns)
+    )
+    return U_tax_net, Y_tax_net
 
-    def stream_product_row_sums(csv_path):
-        totals = np.zeros(n_product_rows, dtype=np.float64)
-        cursor = 0
-        p_row = 0
-        for chunk in pd.read_csv(csv_path, header=None, chunksize=chunksize, dtype=np.float64):
-            n = chunk.shape[0]
-            chunk_is_industry = is_industry[cursor : cursor + n]
-            row_sums = chunk.to_numpy()[~chunk_is_industry].sum(axis=1)
-            totals[p_row : p_row + row_sums.shape[0]] = row_sums
-            p_row += row_sums.shape[0]
-            cursor += n
-        return totals
 
-    t004_sums = stream_product_row_sums(t004_path)
-    t005_sums = stream_product_row_sums(t005_path)
-    y004_sums = pd.read_csv(y004_path, header=None, dtype=np.float64).to_numpy()[~is_industry].sum(axis=1)
-    y005_sums = pd.read_csv(y005_path, header=None, dtype=np.float64).to_numpy()[~is_industry].sum(axis=1)
+def _collapse_to_buyer_region_total(tax_block):
+    """Collapse a seller-row x buyer-column tax matrix to one total per (buyer region, product sector).
 
-    return pd.Series(t004_sums + t005_sums + y004_sums + y005_sums, index=product_index)
+    Sums away the seller region (keeping the product's own sector) and the buyer's
+    own sector/category (keeping only the buyer's region) -- the same buyer-region x
+    product-sector total the old compute_net_sales_taxes produced, just derived from
+    the already-built full-resolution matrix instead of re-reading the source csvs.
+    """
+    by_product_sector = tax_block.groupby(level="sector").sum()
+    return by_product_sector.T.groupby(level="region").sum().T
 
 
 def parse_gloria_lowmem(path, year, version=59, price="bp", country_names="gloria", construct="B", chunksize=1000):
@@ -227,8 +270,10 @@ def parse_gloria_lowmem(path, year, version=59, price="bp", country_names="glori
     data["U"] = pd.DataFrame(U_arr, index=product_index, columns=industry_index)
 
     print("Streaming tax/subsidy-on-products matrices for net sales tax...")
-    net_sales_tax = compute_net_sales_taxes(mrio_path, year, version, is_industry, product_index, chunksize)
-    data["net_sales_tax_by_product"] = net_sales_tax.to_frame(name="value")
+    data["U_tax_net"], data["Y_tax_net"] = compute_net_sales_tax_matrices(
+        mrio_path, year, version, is_industry, product_pos, industry_pos,
+        product_index, industry_index, data["Y"].columns, chunksize,
+    )
 
     print("Checking for empty countries...")
     row_sum = data["V"].groupby(level="region").sum().sum(axis=1).add(
@@ -239,7 +284,7 @@ def parse_gloria_lowmem(path, year, version=59, price="bp", country_names="glori
     )
     empty_countries = row_sum[(row_sum == 0) & (column_sum == 0)].index.to_list()
 
-    for key in ("V", "U", "Y", "VA", "Q", "QY", "net_sales_tax_by_product"):
+    for key in ("V", "U", "Y", "VA", "Q", "QY", "U_tax_net", "Y_tax_net"):
         if "region" in data[key].columns.names:
             if empty_countries:
                 meta_rec._add_modify(f"Remove empty countries ({empty_countries}) columns from {key}")
@@ -254,7 +299,12 @@ def parse_gloria_lowmem(path, year, version=59, price="bp", country_names="glori
     else:
         print("  None found.")
 
-    net_sales_tax = data.pop("net_sales_tax_by_product")["value"]
+    U_tax_net = data.pop("U_tax_net")
+    Y_tax_net = data.pop("Y_tax_net")
+    net_sales_tax = _collapse_to_buyer_region_total(U_tax_net).add(
+        _collapse_to_buyer_region_total(Y_tax_net), fill_value=0.0
+    ).T.stack()
+    net_sales_tax.index.names = ["region", "sector"]
 
     # Remove 0s in value added, final demand and satellites (redundant Industry/Product level)
     data["VA"] = data["VA"].loc[:, data["VA"].columns.get_level_values(1) == "Industry"]
@@ -315,6 +365,15 @@ def parse_gloria_lowmem(path, year, version=59, price="bp", country_names="glori
         },
         meta=meta_rec,
     )
+
+    # Full-resolution net tax matrices, stashed as extra attributes rather than
+    # folded into VA.F -- aggregate_GLORIA reindexes these to gloria.Z/gloria.Y's
+    # order right before calling .aggregate(), which picks them up automatically
+    # (same seller-row x buyer-column labeling as Z/Y) without any change to
+    # pymrio's own aggregation code. See reformat_lib.compute_real_consumption_taxes
+    # for how the aggregated result gets used.
+    gloria.VA.tax_on_intermediate = U_tax_net
+    gloria.VA.tax_on_final_demand = Y_tax_net
 
     print("Parsing complete.")
     return gloria

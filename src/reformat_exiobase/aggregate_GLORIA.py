@@ -36,10 +36,33 @@ def aggregate_GLORIA(reg_map_path, sec_map_path, output_path, input_path, year):
 
     print("Aggregating GLORIA...")
 
-    io_vec_agg = (
-        gloria
-        .calc_all()
-        .aggregate(region_agg=region_aggregation_vector, sector_agg=sector_aggregation_vector, inplace=True)
+    gloria.calc_all()
+
+    # gloria.aggregate() combines rows/columns by position, not by re-matching
+    # labels -- it applies the same region/sector concordance matrix to every
+    # DataFrame it finds via positional matrix multiplication (conc @ df @
+    # conc.T), the same way it aggregates Z itself. tax_on_intermediate/
+    # tax_on_final_demand were built earlier in parse_gloria_lowmem from the
+    # same region/sector labels as Z/Y, but not necessarily in the same row/
+    # column *order* -- this label-based reindex forces that exact order so
+    # aggregate()'s positional math lines each row/column up with the right
+    # (region, sector) pair. Any NaN after reindexing would mean our tax data
+    # doesn't actually cover the same (region, sector) labels as Z/Y.
+    gloria.VA.tax_on_intermediate = gloria.VA.tax_on_intermediate.reindex(
+        index=gloria.Z.index, columns=gloria.Z.columns
+    )
+    gloria.VA.tax_on_final_demand = gloria.VA.tax_on_final_demand.reindex(
+        index=gloria.Z.index, columns=gloria.Y.columns
+    )
+    assert not gloria.VA.tax_on_intermediate.isna().any().any(), (
+        "tax_on_intermediate has labels that don't match Z after reindexing"
+    )
+    assert not gloria.VA.tax_on_final_demand.isna().any().any(), (
+        "tax_on_final_demand has labels that don't match Z/Y after reindexing"
+    )
+
+    io_vec_agg = gloria.aggregate(
+        region_agg=region_aggregation_vector, sector_agg=sector_aggregation_vector, inplace=True
     )
 
     ##### EXPORT AGGREGATED MRIO IN EXIOBASE FORMAT #####

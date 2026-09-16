@@ -334,6 +334,44 @@ def adjust_tax_rates(Z: pd.DataFrame, Y: pd.DataFrame, F: pd.DataFrame, map_fina
     return pd.Series(result.x, index=Z.columns)
 
 
+def compute_real_consumption_taxes(tax_on_intermediate, tax_on_final_demand, fd_dom, fd_imp, map_final_demand):
+    """Split real net-taxes-less-subsidies-on-products data into a domestic/imported x
+    per-agent structure, instead of reallocating one collapsed scalar via a uniform
+    ad-valorem rate.
+
+    Unlike reformat_EXIOBASE's adjust_tax_rates/disaggregate_tax (a least-squares fit
+    reconciling a single national total, because EXIOBASE has no equivalent per-buyer
+    tax data to split directly), GLORIA's tax_on_intermediate/tax_on_final_demand
+    already carry the real seller-row x buyer-column resolution (built in
+    parse_GLORIA.compute_net_sales_tax_matrices, aggregated the same way as Z/Y) --
+    so no fitting/reconciliation step is needed, only the same domestic/imported/
+    per-agent split already applied to Z/Y themselves.
+
+    Cell definition: in compute_intermediate_imports(tax_on_intermediate).T /
+    compute_intermediate_domestic_demand(tax_on_intermediate).T, row = buying sector,
+    column = product purchased -- e.g. cell(row=Composite, column=Equipment) = tax
+    Composite paid buying Equipment products, so summing all rows within the
+    Equipment column gives total tax on intermediate consumption of Equipment
+    products (matches how cons_taxes[agent] below already uses column=product for
+    final demand). No separate exemption handling is needed here either: an exempt
+    category's real tax cells are already ~0 in the source data.
+    """
+    imp_intermediate_cons_tax = compute_intermediate_imports(tax_on_intermediate).T
+    dom_intermediate_cons_tax = compute_intermediate_domestic_demand(tax_on_intermediate).T
+
+    fd_tax_dom = compute_final_demand_domestic(tax_on_final_demand, map_final_demand)
+    fd_tax_imp = compute_final_demand_imported(tax_on_final_demand, map_final_demand)
+
+    cons_taxes = {"imp": {}, "dom": {}}
+    for agent in final_demand_agents(map_final_demand):
+        cons_taxes["imp"][agent] = fd_tax_imp[agent].to_frame().T
+        cons_taxes["dom"][agent] = fd_tax_dom[agent].to_frame().T
+
+    fd_dom_taxed = fd_dom + fd_tax_dom
+    fd_imp_taxed = fd_imp + fd_tax_imp
+
+    return imp_intermediate_cons_tax, dom_intermediate_cons_tax, cons_taxes, fd_dom_taxed, fd_imp_taxed
+
 
 def compute_imports(net_flows: pd.DataFrame) -> pd.DataFrame:
     regions = net_flows.columns.get_level_values("region").unique()
@@ -463,7 +501,7 @@ def fill_reformat_df_columnwise(reformat_df, col_start, allocation_df, row_start
     return col_end
 
 
-def _report_unbalance(per_region, error_threshold, warning_threshold):
+def _report_unbalance(per_region, error_threshold, warning_threshold, raise_on_exceed=True):
     """
     Shared threshold/reporting logic for both `check_unbalance` (pre-build,
     computed from the raw components) and `check_unbalance_final_format`
@@ -481,10 +519,10 @@ def _report_unbalance(per_region, error_threshold, warning_threshold):
         its cost and use) so it is comparable across sectors of very
         different size.
 
-    Raises a ValueError if the largest relative unbalance (across all
-    regions/sectors) exceeds `error_threshold` (default 1%). Otherwise,
-    issues a UserWarning listing every (region, sector) pair whose relative
-    unbalance exceeds `warning_threshold` (default 1e-4).
+    Raises a ValueError if `raise_on_exceed` is True and the largest relative
+    unbalance (across all regions/sectors) exceeds `error_threshold` (default
+    1%). Otherwise, issues a UserWarning listing every (region, sector) pair
+    whose relative unbalance exceeds `warning_threshold` (default 1e-4).
 
     Returns
     -------
@@ -516,7 +554,7 @@ def _report_unbalance(per_region, error_threshold, warning_threshold):
     if flagged:
         flagged.sort(reverse=True)
         details = "; ".join(f"{r}/{s}: {rel:.4%}" for rel, r, s in flagged)
-        if max_unbalance > error_threshold:
+        if raise_on_exceed and max_unbalance > error_threshold:
             raise ValueError(
                 f"Max unbalance ({max_unbalance:.4%}) exceeds the {error_threshold:.2%} error "
                 f"threshold. Offending region/sector pairs (unbalance > {warning_threshold:.4%}): {details}"
@@ -543,8 +581,14 @@ def _region_cost_and_use(r, intermediate_dom, intermediate_imp, L, K, R, M, prod
         + pd.concat([L, K, R]).sum(axis=0)[r]
         + M[r].sum(axis=0)
         + production_taxes[r].sum(axis=0)
-        + imp_intermediate_cons_tax.loc[r].sum(axis=0)
-        + dom_intermediate_cons_tax.loc[r].sum(axis=0)
+        # imp/dom_intermediate_cons_tax are row=buyer, column=product (the one
+        # buyer-vs-seller-ambiguous term here) -- sum(axis=1) collapses products,
+        # keeping buyer j's own total tax paid on its purchases, consistent with
+        # every other term above being attributed to sector j as buyer/producer.
+        # sum(axis=0) would instead collapse buyers and keep product j, i.e. tax
+        # collected on SELLING product j -- a different, seller-side quantity.
+        + imp_intermediate_cons_tax.loc[r].sum(axis=1)
+        + dom_intermediate_cons_tax.loc[r].sum(axis=1)
         + cons_taxes["imp"]["I"][r].sum(axis=0) + cons_taxes["dom"]["I"][r].sum(axis=0)
         + cons_taxes["imp"]["C"][r].sum(axis=0) + cons_taxes["dom"]["C"][r].sum(axis=0)
         + cons_taxes["imp"]["G"][r].sum(axis=0) + cons_taxes["dom"]["G"][r].sum(axis=0)
@@ -618,7 +662,7 @@ def zero_out_regional_noise(intermediate_dom, intermediate_imp, L, K, R, M, X, p
 
 def check_unbalance(regions, intermediate_dom, intermediate_imp, L, K, R, M, X, production_taxes,
                      imp_intermediate_cons_tax, dom_intermediate_cons_tax, cons_taxes, total_demand,
-                     error_threshold=0.01, warning_threshold=1e-4):
+                     error_threshold=0.01, warning_threshold=1e-4, raise_on_exceed=True):
     """
     Check, for every region and sector, that total production cost matches
     total use -- computed directly from the pre-build components, before
@@ -631,7 +675,7 @@ def check_unbalance(regions, intermediate_dom, intermediate_imp, L, K, R, M, X, 
             r, intermediate_dom, intermediate_imp, L, K, R, M, production_taxes,
             imp_intermediate_cons_tax, dom_intermediate_cons_tax, cons_taxes, total_demand, X)
         per_region[r] = (sub_demand.index, cost.to_numpy(), use.to_numpy())
-    return _report_unbalance(per_region, error_threshold, warning_threshold)
+    return _report_unbalance(per_region, error_threshold, warning_threshold, raise_on_exceed)
 
 
 def attribute_unbalance_to_final_consumers(regions, intermediate_dom, intermediate_imp, L, K, R, M, X,
@@ -672,7 +716,8 @@ def attribute_unbalance_to_final_consumers(regions, intermediate_dom, intermedia
     return total_demand
 
 
-def check_unbalance_final_format(regional_IOTs_dict, len_sectors, error_threshold=0.01, warning_threshold=1e-4):
+def check_unbalance_final_format(regional_IOTs_dict, len_sectors, error_threshold=0.01, warning_threshold=1e-4,
+                                  raise_on_exceed=True):
     """
     Check that each region's assembled IOT balances: for every sector, total
     output (row sum) must match total input (column sum). The unbalance is
@@ -690,7 +735,7 @@ def check_unbalance_final_format(regional_IOTs_dict, len_sectors, error_threshol
         sum_cols = df.xs('∑', level='Subcategory', axis=1).sum(axis=1)[:len_sectors]
         sector_labels = sum_rows.index.get_level_values('Subcategory')
         per_region[r] = (sector_labels, sum_rows.to_numpy().flatten(), sum_cols.to_numpy().flatten())
-    return _report_unbalance(per_region, error_threshold, warning_threshold)
+    return _report_unbalance(per_region, error_threshold, warning_threshold, raise_on_exceed)
 
 
 def build_regional_IOTs(regions, sectors, map_GTAP_cost_structure, map_GTAP_consumption_structure,
@@ -786,16 +831,24 @@ def build_regional_IOTs(regions, sectors, map_GTAP_cost_structure, map_GTAP_cons
             df_dict[r], row_start, production_taxes[r], col_start, col_end)
 
         # cons taxes
+        # "∑" here sums(axis=1) rather than axis=0 like every other block above:
+        # imp/dom_intermediate_cons_tax's detail rows are row=buyer/column=product
+        # (unlike intermediate_dom/imp's row=seller/column=buyer), so collapsing the
+        # detail rows the same way as everything else (axis=0) would give a
+        # seller/product-side total instead of buyer j's own tax cost -- see
+        # _region_cost_and_use, which this must keep mirroring.
         row_start = fill_reformat_df_row_wise(
             df_dict[r], row_start, imp_intermediate_cons_tax.loc[r], col_start, col_end)
         row_start = fill_reformat_df_row_wise(
-            df_dict[r], row_start, imp_intermediate_cons_tax.loc[r].sum(axis=0), col_start, col_end)
+            df_dict[r], row_start, imp_intermediate_cons_tax.loc[r].sum(axis=1), col_start, col_end)
         row_start = fill_reformat_df_row_wise(
             df_dict[r], row_start, dom_intermediate_cons_tax.loc[r], col_start, col_end)
         row_start = fill_reformat_df_row_wise(
-            df_dict[r], row_start, dom_intermediate_cons_tax.loc[r].sum(axis=0), col_start, col_end)
-        row_start = fill_reformat_df_row_wise(df_dict[r], row_start, pd.concat(
-            [imp_intermediate_cons_tax.loc[r], dom_intermediate_cons_tax.loc[r]]).sum(axis=0), col_start, col_end)
+            df_dict[r], row_start, dom_intermediate_cons_tax.loc[r].sum(axis=1), col_start, col_end)
+        row_start = fill_reformat_df_row_wise(
+            df_dict[r], row_start,
+            imp_intermediate_cons_tax.loc[r].sum(axis=1) + dom_intermediate_cons_tax.loc[r].sum(axis=1),
+            col_start, col_end)
 
         row_start = fill_reformat_df_row_wise(
             df_dict[r], row_start, cons_taxes["imp"]["I"][r], col_start, col_end)
@@ -953,6 +1006,26 @@ def _load_FZY(aggregation_folder, io_config, sectors_order):
     Z = reorder_io_matrix(Z, sectors)
 
     return F, Z, Y, regions, sectors
+
+
+def _load_gloria_tax_matrices(aggregation_folder, io_config, sectors):
+    """Load the real per-buyer net-tax matrices aggregate_GLORIA exports
+    (VA/tax_on_intermediate.txt, VA/tax_on_final_demand.txt), reordered the same way
+    _load_FZY reorders Z/Y. GLORIA-only: EXIOBASE's aggregation folder has no
+    equivalent, since reformat_EXIOBASE reconciles tax via adjust_tax_rates instead
+    (see compute_real_consumption_taxes) -- so this is a sibling loader to _load_FZY
+    rather than folded into it.
+    """
+    va_folder = io_config["input_files"]["factor_inputs_subfolder"]
+    tax_on_intermediate = pd.read_csv(f"{aggregation_folder}/{va_folder}/tax_on_intermediate.txt", delimiter="\t",
+                                       header=[0, 1], index_col=[0, 1])
+    tax_on_final_demand = pd.read_csv(f"{aggregation_folder}/{va_folder}/tax_on_final_demand.txt", delimiter="\t",
+                                       header=[0, 1], index_col=[0, 1])
+
+    tax_on_intermediate = reorder_io_matrix(tax_on_intermediate, sectors)
+    tax_on_final_demand = reorder_io_rows(tax_on_final_demand, sectors)
+
+    return tax_on_intermediate, tax_on_final_demand
 
 
 def _value_added_LKR(F, map_final_demand):

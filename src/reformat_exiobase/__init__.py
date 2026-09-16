@@ -11,3 +11,4 @@ from .reformat_IOT import reformat_EXIOBASE, reformat_GLORIA
 from .aggregate_EXIOBASE import aggregate_EXIOBASE
 from .parse_GLORIA import parse_gloria_lowmem
 from .aggregate_GLORIA import aggregate_GLORIA
+from .diagnostics.extract_GLORIA_raw_flows import extract_china_target_sector_flows

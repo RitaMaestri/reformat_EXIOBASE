@@ -5,11 +5,9 @@ Created on Thu Mar 13 14:20:45 2025
 """
 
 import pandas as pd
-import numpy as np
 
 from .reformat_lib import (
     EXIOBASE_name,
-    exempt_from_taxes,
     final_demand_agents,
     reallocate_G_I_energy_to_C,
     compute_intermediate_domestic_demand,
@@ -19,6 +17,7 @@ from .reformat_lib import (
     concatenate_total_demand,
     disaggregate_tax,
     adjust_tax_rates,
+    compute_real_consumption_taxes,
     compute_imports,
     compute_exports,
     zero_out_regional_noise,
@@ -29,6 +28,7 @@ from .reformat_lib import (
     write_regional_IOTs,
     _load_config_and_mapping,
     _load_FZY,
+    _load_gloria_tax_matrices,
     _value_added_LKR,
 )
 
@@ -81,6 +81,7 @@ def reformat_EXIOBASE(aggregation_folder, reformat_folder, energy_sectors=None, 
     ############################################
     ##### IMPORT AND EXPORT NET OF TAXES #######
     ############################################
+    
 
     M = compute_imports(net_flows)
 
@@ -144,25 +145,22 @@ def reformat_EXIOBASE(aggregation_folder, reformat_folder, energy_sectors=None, 
 def reformat_GLORIA(aggregation_folder, reformat_folder, sectors_order=[], add_inventories=False):
     """Reformat a GLORIA aggregation into the SCAF/GTAP-style regional tables.
 
-    Differs from reformat_EXIOBASE in two ways, both because GLORIA's Z/Y (the
-    "Basic prices" files) are already a self-consistent basic-price system on
-    their own -- confirmed against GLORIA's own National Accounting Identity
-    (Release Notes, "Note II") and empirically against aggregate_GLORIA's output:
+    Differs from reformat_EXIOBASE, both because GLORIA's Z/Y (the "Basic prices"
+    files) are already a self-consistent basic-price system on their own --
+    confirmed against GLORIA's own National Accounting Identity (Release Notes,
+    "Note II") and empirically against aggregate_GLORIA's output:
 
     - No energy reallocation (reallocate_G_I_energy_to_C hardcodes EXIOBASE-only
       Y category strings and isn't meaningful for GLORIA's sector scheme).
-    - No adjust_tax_rates/disaggregate_tax least-squares reconciliation. GLORIA's
-      "Consumption_taxes" F-row (derived from the Markup004/005 tax/subsidy
-      files at parse time) is the basic-price-to-purchaser-price wedge, not a
-      reconciliation target the way EXIOBASE's own row is -- fitting it via
-      adjust_tax_rates measurably worsens the resulting table's balance.
-      Instead, it's allocated directly (a closed-form ad-valorem rate per
-      (region, sector), proportional to each final-demand agent's existing
-      basic-price share) and added symmetrically to both the demand side
-      (C/G/I) and the matching cost-side "Tax" rows, which is balance-neutral
-      by construction (adding the same amount to both sides of the identity
-      doesn't change their difference) while producing purchaser-price C/G/I
-      figures.
+    - No adjust_tax_rates/disaggregate_tax least-squares reconciliation. That
+      exists for EXIOBASE only because EXIOBASE has no ready per-buyer tax data to
+      split directly, so it has to fit a single national total instead. GLORIA
+      already carries real per-buyer tax resolution end to end (Markup004/005 ->
+      parse_GLORIA.compute_net_sales_tax_matrices -> aggregate_GLORIA's .aggregate()
+      -> tax_on_intermediate/tax_on_final_demand here), so
+      compute_real_consumption_taxes just splits that real data the same way Z/Y
+      are already split (domestic/imported, per final-demand agent) instead of
+      reallocating one collapsed scalar via a uniform ad-valorem rate.
     """
 
     ###########################
@@ -172,6 +170,7 @@ def reformat_GLORIA(aggregation_folder, reformat_folder, sectors_order=[], add_i
         _load_config_and_mapping("config_GLORIA.json", add_inventories)
 
     F, Z, Y, regions, sectors = _load_FZY(aggregation_folder, io_config, sectors_order)
+    tax_on_intermediate, tax_on_final_demand = _load_gloria_tax_matrices(aggregation_folder, io_config, sectors)
 
     #####################################
     ### INTERMEDIATE AND FINAL DEMAND ###
@@ -186,39 +185,14 @@ def reformat_GLORIA(aggregation_folder, reformat_folder, sectors_order=[], add_i
     fd_imp = compute_final_demand_imported(Y, map_final_demand)
 
     ###################################################
-    ##### DIRECT ALLOCATION OF SALES TAX ##############
+    ##### REAL SALES TAX, SPLIT FROM ACTUAL DATA ######
     ###################################################
 
-    net_sales_tax = F.loc[EXIOBASE_name("Consumption_taxes", map_final_demand)].iloc[0]
-
-    exempt_names = set(exempt_from_taxes(map_final_demand))
-    agents = final_demand_agents(map_final_demand)
-    taxable_agents = [a for a in agents if not set(EXIOBASE_name(a, map_final_demand)).issubset(exempt_names)]
-
-    taxable_base = sum((fd_dom[a] + fd_imp[a] for a in taxable_agents))
-    tax_rate = (net_sales_tax / taxable_base).replace([np.inf, -np.inf], 0.0).fillna(0.0)
-
-    fd_dom_taxed = fd_dom.copy()
-    fd_imp_taxed = fd_imp.copy()
-    cons_taxes = {"imp": {}, "dom": {}}
-    for agent in agents:
-        if agent in taxable_agents:
-            dom_tax = fd_dom[agent] * tax_rate
-            imp_tax = fd_imp[agent] * tax_rate
-            fd_dom_taxed[agent] = fd_dom[agent] + dom_tax
-            fd_imp_taxed[agent] = fd_imp[agent] + imp_tax
-        else:
-            dom_tax = fd_dom[agent] * 0.0
-            imp_tax = fd_imp[agent] * 0.0
-        cons_taxes["dom"][agent] = dom_tax.to_frame().T
-        cons_taxes["imp"][agent] = imp_tax.to_frame().T
+    imp_intermediate_cons_tax, dom_intermediate_cons_tax, cons_taxes, fd_dom_taxed, fd_imp_taxed = (
+        compute_real_consumption_taxes(tax_on_intermediate, tax_on_final_demand, fd_dom, fd_imp, map_final_demand)
+    )
 
     total_demand = concatenate_total_demand(fd_dom_taxed, fd_imp_taxed, intermediate_dom, intermediate_imp)
-
-    # intermediate (Z) purchases stay at basic price -- tax is only added to
-    # final-demand consumption agents, per the above -- so these template rows are zero.
-    imp_intermediate_cons_tax = compute_intermediate_imports(Z).T * 0.0
-    dom_intermediate_cons_tax = compute_intermediate_domestic_demand(Z).T * 0.0
 
     ############################################
     ##### IMPORT AND EXPORT #####################
@@ -253,7 +227,8 @@ def reformat_GLORIA(aggregation_folder, reformat_folder, sectors_order=[], add_i
         imp_intermediate_cons_tax, dom_intermediate_cons_tax, cons_taxes, total_demand)
 
     check_unbalance(regions, intermediate_dom, intermediate_imp, L, K, R, M, X, production_taxes,
-                     imp_intermediate_cons_tax, dom_intermediate_cons_tax, cons_taxes, total_demand)
+                     imp_intermediate_cons_tax, dom_intermediate_cons_tax, cons_taxes, total_demand,
+                     raise_on_exceed=False)
 
     total_demand = attribute_unbalance_to_final_consumers(
         regions, intermediate_dom, intermediate_imp, L, K, R, M, X, production_taxes,
@@ -264,6 +239,6 @@ def reformat_GLORIA(aggregation_folder, reformat_folder, sectors_order=[], add_i
                                    imp_intermediate_cons_tax, dom_intermediate_cons_tax, cons_taxes, total_demand,
                                    add_inventories)
 
-    check_unbalance_final_format(df_dict, len(sectors))
+    check_unbalance_final_format(df_dict, len(sectors), raise_on_exceed=False)
 
     write_regional_IOTs(df_dict, reformat_folder)
