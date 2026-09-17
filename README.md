@@ -87,4 +87,4 @@ output valued at basic prices = gross value added at basic prices plus intermedi
 5. `EXP` / `EXP_TRANSP` `∑` — exports, at basic price (not grossed up by tax).
 6. `∑∑∑` — grand total per row; the column-sum balance check.
 
-`check_unbalance`/`check_unbalance_final_format` verify that, for every sector, row block 8's total matches column block 6's total.
+To verify balance, sum over all the `∑` subcategory labels, row-wise for uses and column-wise for ressources. 
