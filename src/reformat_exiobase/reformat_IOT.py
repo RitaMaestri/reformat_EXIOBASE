@@ -237,7 +237,7 @@ def reformat_GLORIA(aggregation_folder, reformat_folder, sectors_order=[], add_i
     df_dict = build_regional_IOTs(regions, sectors, map_GTAP_cost_structure, map_GTAP_consumption_structure,
                                    intermediate_dom, intermediate_imp, L, K, R, M, X, production_taxes,
                                    imp_intermediate_cons_tax, dom_intermediate_cons_tax, cons_taxes, total_demand,
-                                   add_inventories)
+                                   add_inventories, transpose_intermediate_cons_tax=True)
 
     check_unbalance_final_format(df_dict, len(sectors), raise_on_exceed=False)
 

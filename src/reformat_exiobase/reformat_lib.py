@@ -743,12 +743,19 @@ def check_unbalance_final_format(regional_IOTs_dict, len_sectors, error_threshol
 def build_regional_IOTs(regions, sectors, map_GTAP_cost_structure, map_GTAP_consumption_structure,
                          intermediate_dom, intermediate_imp, L, K, R, M, X, production_taxes,
                          imp_intermediate_cons_tax, dom_intermediate_cons_tax, cons_taxes, total_demand,
-                         add_inventories):
+                         add_inventories, transpose_intermediate_cons_tax=False):
     """Assemble the regional_IOT_format-shaped table (per region) from already-computed components.
 
     Dataset-agnostic: only cares about the shapes of its inputs, not how they were computed, so
     it's shared between reformat_EXIOBASE (least-squares tax reconciliation) and reformat_GLORIA
     (direct proportional tax allocation).
+
+    transpose_intermediate_cons_tax: imp/dom_intermediate_cons_tax are natively row=buyer,
+    column=product -- the opposite of every other block's row=seller/column=buyer convention.
+    Default False keeps that native layout (reformat_EXIOBASE, unchanged for backwards
+    compatibility). GLORIA passes True to display these detail rows row=product/column=buyer
+    like everything else; the values themselves (and the ∑ row, and Total_TLSP) are unaffected
+    either way, only the on-screen layout of the detail rows changes.
     """
     ########################
     #### create indexes ####
@@ -833,18 +840,22 @@ def build_regional_IOTs(regions, sectors, map_GTAP_cost_structure, map_GTAP_cons
             df_dict[r], row_start, production_taxes[r], col_start, col_end)
 
         # cons taxes
-        # "∑" here sums(axis=1) rather than axis=0 like every other block above:
-        # imp/dom_intermediate_cons_tax's detail rows are row=buyer/column=product
-        # (unlike intermediate_dom/imp's row=seller/column=buyer), so collapsing the
-        # detail rows the same way as everything else (axis=0) would give a
-        # seller/product-side total instead of buyer j's own tax cost -- see
-        # _region_cost_and_use, which this must keep mirroring.
+        # imp/dom_intermediate_cons_tax detail rows are natively row=buyer/column=product
+        # (unlike intermediate_dom/imp's row=seller/column=buyer). When
+        # transpose_intermediate_cons_tax is set (GLORIA), the *detail* rows placed below
+        # are transposed to row=product/column=buyer to match every other block's
+        # convention -- but the "∑" row keeps summing the untransposed matrix (axis=1),
+        # since .T.sum(axis=0) == .sum(axis=1): the ∑ values (read by
+        # _region_cost_and_use/check_unbalance) are identical either way, only the
+        # detail-row layout above them differs.
+        imp_detail = imp_intermediate_cons_tax.loc[r].T if transpose_intermediate_cons_tax else imp_intermediate_cons_tax.loc[r]
+        dom_detail = dom_intermediate_cons_tax.loc[r].T if transpose_intermediate_cons_tax else dom_intermediate_cons_tax.loc[r]
         row_start = fill_reformat_df_row_wise(
-            df_dict[r], row_start, imp_intermediate_cons_tax.loc[r], col_start, col_end)
+            df_dict[r], row_start, imp_detail, col_start, col_end)
         row_start = fill_reformat_df_row_wise(
             df_dict[r], row_start, imp_intermediate_cons_tax.loc[r].sum(axis=1), col_start, col_end)
         row_start = fill_reformat_df_row_wise(
-            df_dict[r], row_start, dom_intermediate_cons_tax.loc[r], col_start, col_end)
+            df_dict[r], row_start, dom_detail, col_start, col_end)
         row_start = fill_reformat_df_row_wise(
             df_dict[r], row_start, dom_intermediate_cons_tax.loc[r].sum(axis=1), col_start, col_end)
         row_start = fill_reformat_df_row_wise(
