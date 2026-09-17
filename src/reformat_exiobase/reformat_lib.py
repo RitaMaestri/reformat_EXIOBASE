@@ -549,11 +549,11 @@ def _report_unbalance(per_region, error_threshold, warning_threshold, raise_on_e
             if rel > warning_threshold:
                 flagged.append((rel, r, sector))
 
-    print("Max unbalance across regions:", max_unbalance)
+    print("Max unbalance of all regions and sectors:", max_unbalance)
 
     if flagged:
         flagged.sort(reverse=True)
-        details = "; ".join(f"{r}/{s}: {rel:.4%}" for rel, r, s in flagged)
+        details = "\n".join(f"{r}/{s}: {rel:.4%}" for rel, r, s in flagged)
         if raise_on_exceed and max_unbalance > error_threshold:
             raise ValueError(
                 f"Max unbalance ({max_unbalance:.4%}) exceeds the {error_threshold:.2%} error "
@@ -692,6 +692,8 @@ def attribute_unbalance_to_final_consumers(regions, intermediate_dom, intermedia
 
     Mutates and returns `total_demand`.
     """
+    print("Balancing small unbalances...")
+
     demand_cols = [("imp", "C"), ("dom", "C"), ("imp", "G"), ("dom", "G"), ("imp", "I"), ("dom", "I")]
     for r in regions:
         cost, use, sub_demand = _region_cost_and_use(

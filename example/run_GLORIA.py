@@ -18,12 +18,12 @@ sec_map_file = mappings_path / "map_sectors_GLORIA.csv"
 
 year = 2020
 
-aggregate_GLORIA(
-    reg_map_path=str(reg_map_file),
-    sec_map_path=str(sec_map_file),
-    output_path=str(aggregation_path),
-    input_path=str(input_path),
-    year=year,
-)
+#aggregate_GLORIA(
+#    reg_map_path=str(reg_map_file),
+#    sec_map_path=str(sec_map_file),
+#    output_path=str(aggregation_path),
+#    input_path=str(input_path),
+#    year=year,
+#)
 
 reformat_GLORIA(aggregation_folder=str(aggregation_path), reformat_folder=str(reformat_path))
