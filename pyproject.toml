@@ -1,6 +1,6 @@
 [project]
 name = "reformat-exiobase"
-version = "0.2.2"
+version = "0.2.3"
 description = "Tool to download, aggregate and reformat EXIOBASE data"
 authors = [
     {name = "RitaMaestri",email = "maestri@smash.fr"}
